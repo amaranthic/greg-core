@@ -1,5 +1,11 @@
 # @amaranthic/greg-sdk
 
+[![npm version](https://img.shields.io/npm/v/@amaranthic/greg-sdk.svg?style=flat-square&color=black)](https://www.npmjs.com/package/@amaranthic/greg-sdk)
+[![license](https://img.shields.io/npm/l/@amaranthic/greg-sdk.svg?style=flat-square&color=blue)](LICENSE)
+[![bun](https://img.shields.io/badge/tested%20with-bun-fbf0df.svg?style=flat-square&logo=bun&logoColor=black)](https://bun.sh)
+[![node](https://img.shields.io/badge/node-%3E%3D22.0.0-339933.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/types-TypeScript-3178C6.svg?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+
 > **The unified agent runtime powering Greg harnesses, built on Vercel AI SDK.**
 
 Greg SDK is the foundational runtime layer powering the Greg agent ecosystem—including **Greg Code**, **Greg Actions**, **Greg ACP**, and custom coding harnesses. Built directly on top of [Vercel AI SDK v7](https://ai-sdk.dev), it provides single-string model resolution, mandatory per-request credentials, and zero-compromise SDK capability preservation.
