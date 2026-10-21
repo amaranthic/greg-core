@@ -36,6 +36,7 @@
   "author": "Amaranthic",
   "license": "MIT",
   "dependencies": {
+    "@ai-sdk/alibaba": "2.0.73",
     "@ai-sdk/anthropic": "4.0.85",
     "@ai-sdk/cohere": "4.0.66",
     "@ai-sdk/deepseek": "3.0.70",
