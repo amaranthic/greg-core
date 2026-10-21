@@ -209,6 +209,11 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Ensure latest npm for OIDC trusted publishing
+        run: |
+          npm install -g npm@latest
+          rm -f ~/.npmrc .npmrc
+
       - name: Install dependencies
         run: bun install
 
