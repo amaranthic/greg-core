@@ -1,0 +1,38 @@
+{
+  "name": "@amaranthic/greg-sdk",
+  "version": "0.1.0",
+  "description": "A unified model runtime built on top of Vercel AI SDK v7",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amaranthic/greg-sdk.git"
+  },
+  "keywords": [
+    "ai",
+    "vercel-ai-sdk",
+    "runtime",
+    "llm",
+    "greg-sdk"
+  ],
+  "author": "Amaranthic",
+  "license": "MIT"
+}
