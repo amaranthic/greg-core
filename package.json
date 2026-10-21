@@ -34,5 +34,12 @@
     "greg-sdk"
   ],
   "author": "Amaranthic",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "ai": "7.0.148"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  }
 }
