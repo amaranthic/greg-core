@@ -39,6 +39,7 @@ console.log(result.text);
 - **Structured Outputs**: `generateObject` and `streamObject` validating JSON output against Zod or standard schemas.
 - **Multi-Step Tool Calling & Agents**: Native `tool()` support with `inputSchema`, multi-turn execution loops via `stopWhen: isStepCount(n)`, and conversation history preservation via `result.responseMessages`.
 - **Custom Endpoints**: OpenAI-compatible routing via the `compatible/` prefix (e.g. vLLM, Ollama, LM Studio, proxies).
+- **Vercel AI Gateway**: Unified routing via `vercelgateway/<model_pid>` (e.g. `vercelgateway/openai/gpt-4o`).
 - **Provider-Specific Settings**: Direct passthrough of `providerOptions` (e.g. reasoning effort, safety settings, thinking budget, prompt caching).
 - **100% AI SDK Parity**: All native exports (`ToolLoopAgent`, `tool`, `isStepCount`, error classes, prompts, middleware) are directly re-exported.
 
@@ -54,7 +55,7 @@ console.log(result.text);
 
 - **❌ No Video or Audio Generation (`generateSpeech`)**: Media generation APIs are outside the scope of Greg's agent runtime.
 - **❌ No Ambient Environment Variable Singletons**: Greg SDK **never** falls back to `process.env.OPENAI_API_KEY` or similar globals. Every invocation requires explicit `apiKey` and `baseUrl`.
-- **❌ No Silent AI Gateway Fallthrough**: Model strings never silently route to default Vercel AI Gateway endpoints.
+- **❌ No Silent AI Gateway Fallthrough**: Standard strings like `openai/gpt-4o` route strictly to official direct provider endpoints. To route through Vercel AI Gateway, specify the explicit prefix `vercelgateway/<model_id>` (e.g. `vercelgateway/openai/gpt-4o`).
 
 ---
 
@@ -71,6 +72,7 @@ Model strings are split on the **first `/` only**:
 | `anthropic/claude-3-7-sonnet` | `anthropic` | `claude-3-7-sonnet` | Standard model |
 | `google/gemini-2.5-flash-lite` | `google` | `gemini-2.5-flash-lite` | Standard model |
 | `openrouter/openrouter/free` | `openrouter` | `openrouter/free` | Multi-slash model ID preserved |
+| `vercelgateway/openai/gpt-4o` | `vercelgateway` | `openai/gpt-4o` | Gateway model ID preserved |
 | `compatible/meta-llama/llama-3-8b` | `compatible` | `meta-llama/llama-3-8b` | Nested model ID preserved |
 | `gpt-4o` | *None* | *None* | ❌ Throws `InvalidModelStringError` |
 
@@ -237,7 +239,26 @@ console.log(result.text);
 
 ---
 
-### 6. Provider-Specific Options (`providerOptions`)
+### 6. Vercel AI Gateway (`vercelgateway/`)
+
+To route requests through Vercel AI Gateway, provide the model identifier in `vercelgateway/<provider>/<model>` format:
+
+```typescript
+import { generateText } from "@amaranthic/greg-sdk";
+
+const result = await generateText({
+  model: "vercelgateway/openai/gpt-4o",
+  apiKey: process.env.AI_GATEWAY_API_KEY!,
+  baseUrl: "https://ai-gateway.vercel.sh/v4/ai",
+  prompt: "Hello from Vercel AI Gateway!",
+});
+
+console.log(result.text);
+```
+
+---
+
+### 7. Provider-Specific Options (`providerOptions`)
 
 Provider-specific settings are forwarded directly to the native SDK:
 
@@ -270,7 +291,7 @@ const result = await generateText({
 
 ## 🌐 Supported Built-in Providers
 
-Greg pre-bundles the following 12 provider adapters:
+Greg pre-bundles the following 13 provider adapters:
 
 | Provider Key | Native Package | Default Base URL | Model Examples |
 |---|---|---|---|
@@ -285,6 +306,7 @@ Greg pre-bundles the following 12 provider adapters:
 | `togetherai` | `@ai-sdk/togetherai` | `https://api.together.xyz/v1` | `togetherai/meta-llama/Llama-3-70b-chat-hf` |
 | `alibaba` | `@ai-sdk/alibaba` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `alibaba/qwen-max`, `alibaba/qwen-plus` |
 | `openrouter` | `@ai-sdk/openai-compatible` | `https://openrouter.ai/api/v1` | `openrouter/openrouter/free` |
+| `vercelgateway` | `@ai-sdk/gateway` | `https://ai-gateway.vercel.sh/v4/ai` | `vercelgateway/openai/gpt-4o`, `vercelgateway/anthropic/claude-3-7-sonnet` |
 | `compatible` | `@ai-sdk/openai-compatible` | Custom URL (required) | `compatible/org/model-name` |
 
 ---

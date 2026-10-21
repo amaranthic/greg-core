@@ -11,7 +11,7 @@ import { UnsupportedProviderError } from "../src/errors.js";
  * Test suite for provider registry, adapter resolution, and AI Gateway prevention.
  */
 describe("providerResolution", () => {
-  it("should contain all 12 supported providers in the registry", () => {
+  it("should contain all 13 supported providers in the registry", () => {
     const supported = getSupportedProviders();
     const expected = [
       "openai",
@@ -26,6 +26,7 @@ describe("providerResolution", () => {
       "alibaba",
       "openrouter",
       "compatible",
+      "vercelgateway",
     ];
 
     for (const provider of expected) {
@@ -94,6 +95,11 @@ describe("providerResolution", () => {
     const openRouterModel = resolveModel("openrouter/openrouter/free", credentials);
     expect(openRouterModel.modelId).toBe("openrouter/free");
     expect(openRouterModel.provider).toContain("openrouter");
+
+    // Vercel AI Gateway provider instantiation
+    const vercelGatewayModel = resolveModel("vercelgateway/openai/gpt-4o", credentials);
+    expect(vercelGatewayModel.modelId).toBe("openai/gpt-4o");
+    expect(vercelGatewayModel.provider).toBe("gateway");
   });
 
   it("should pass through existing LanguageModel objects directly without re-resolving", () => {

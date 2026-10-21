@@ -12,6 +12,7 @@ import { togetherAIProviderAdapter } from "./providers/togetherai.js";
 import { alibabaProviderAdapter } from "./providers/alibaba.js";
 import { openRouterProviderAdapter } from "./providers/openrouter.js";
 import { compatibleProviderAdapter } from "./providers/compatible.js";
+import { vercelGatewayProviderAdapter } from "./providers/vercelGateway.js";
 
 /**
  * Internal registry mapping provider identifiers to their concrete ProviderAdapter instances.
@@ -40,6 +41,7 @@ registerProviderAdapter(togetherAIProviderAdapter);
 registerProviderAdapter(alibabaProviderAdapter);
 registerProviderAdapter(openRouterProviderAdapter);
 registerProviderAdapter(compatibleProviderAdapter);
+registerProviderAdapter(vercelGatewayProviderAdapter);
 
 /**
  * Returns an array of all currently registered provider identifiers.

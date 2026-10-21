@@ -1,6 +1,6 @@
 {
   "name": "@amaranthic/greg-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The unified agent runtime powering Greg harnesses, built on Vercel AI SDK",
   "type": "module",
   "main": "./dist/index.js",
@@ -61,6 +61,7 @@
     "cohere",
     "together-ai",
     "openrouter",
+    "vercel-gateway",
     "vllm",
     "ollama",
     "openai-compatible",
@@ -79,6 +80,7 @@
     "@ai-sdk/anthropic": "4.0.85",
     "@ai-sdk/cohere": "4.0.66",
     "@ai-sdk/deepseek": "3.0.70",
+    "@ai-sdk/gateway": "4.0.121",
     "@ai-sdk/google": "4.0.102",
     "@ai-sdk/groq": "4.0.67",
     "@ai-sdk/mistral": "4.0.69",
