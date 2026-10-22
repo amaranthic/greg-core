@@ -151,9 +151,9 @@ export async function* runTurn(
 
       // Construct streamText options without explicit undefined keys for exactOptionalPropertyTypes
       const streamOptions: GregStreamTextOptions = {
-        model: config.model,
-        apiKey: config.apiKey,
-        baseUrl: config.baseUrl,
+        model: options.model ?? config.model,
+        apiKey: options.apiKey ?? config.apiKey,
+        baseUrl: options.baseUrl ?? config.baseUrl,
         messages: conversationMessages,
         ...(combinedInstructions ? { instructions: combinedInstructions } : {}),
         ...(hasTools ? { tools: sdkToolDefinitions } : {}),
@@ -497,7 +497,10 @@ export async function* runTurn(
           type: 'tool-result',
           toolCallId: tr.toolCallId,
           toolName: tr.toolName,
-          output: tr.result as any,
+          output:
+            typeof tr.result === 'string'
+              ? { type: 'text', value: tr.result }
+              : { type: 'json', value: (tr.result ?? {}) as any },
         })),
       });
 

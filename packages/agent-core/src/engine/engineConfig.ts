@@ -116,6 +116,21 @@ export interface RunTurnOptions {
   readonly reasoning?: AgentReasoningLevel;
 
   /**
+   * Optional per-turn model override formatted as "provider/model_id" or a LanguageModel.
+   */
+  readonly model?: string | LanguageModel;
+
+  /**
+   * Optional API key override for the per-turn model.
+   */
+  readonly apiKey?: string;
+
+  /**
+   * Optional base URL override for the per-turn model endpoint.
+   */
+  readonly baseUrl?: string;
+
+  /**
    * Maximum autonomous steps for this specific turn.
    */
   readonly maxSteps?: number;
