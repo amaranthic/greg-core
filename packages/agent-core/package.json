@@ -1,0 +1,46 @@
+{
+  "name": "@amaranthic/greg-agent-core",
+  "version": "0.1.0",
+  "description": "Core agent engine, execution loops, checkpointing, and thread sessions for the Greg ecosystem",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amaranthic/greg-core.git",
+    "directory": "packages/agent-core"
+  },
+  "homepage": "https://github.com/amaranthic/greg-core/tree/main/packages/agent-core#readme",
+  "bugs": {
+    "url": "https://github.com/amaranthic/greg-core/issues"
+  },
+  "author": "Amaranthic",
+  "license": "MIT",
+  "dependencies": {
+    "@amaranthic/greg-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  }
+}

@@ -7,6 +7,11 @@
 export * from "ai";
 
 /**
+ * Re-export Zod schema validation library.
+ */
+export { z } from "zod";
+
+/**
  * Greg Runtime Execution Functions
  */
 export {
