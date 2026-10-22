@@ -76,11 +76,35 @@ export class ToolExecutionQueue {
       );
     }
 
-    const executeTask = (): Promise<T> => raceWithSignal(task(), abortSignal);
+    let settleUnderlyingTask!: () => void;
+    const underlyingSettled = new Promise<void>((resolve) => {
+      settleUnderlyingTask = resolve;
+    });
 
-    const nextTail = this.executionTail.then(executeTask, executeTask);
-    this.executionTail = nextTail.catch(() => {});
+    const previousTail = this.executionTail;
+    this.executionTail = previousTail.then(
+      () => underlyingSettled,
+      () => underlyingSettled,
+    );
 
-    return nextTail;
+    // Wait for all prior tasks in the queue to settle completely
+    await previousTail;
+
+    if (abortSignal?.aborted) {
+      settleUnderlyingTask();
+      throw new Error(
+        `Tool execution aborted: ${abortSignal.reason ?? "Aborted by signal"}`,
+      );
+    }
+
+    const taskPromise = (async () => {
+      try {
+        return await task();
+      } finally {
+        settleUnderlyingTask();
+      }
+    })();
+
+    return await raceWithSignal(taskPromise, abortSignal);
   }
 }

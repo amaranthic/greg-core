@@ -9,6 +9,7 @@ import type { AgentEvent } from '../events/index.js';
 import type { StepTokenUsage, TurnFinishReason } from '../events/stepEvents.js';
 import type { ToolExecutionContext } from '../tools/ToolExecutionContext.js';
 import type { AgentEngineConfig, RunTurnOptions } from './engineConfig.js';
+import { AsyncEventQueue } from './eventQueue.js';
 
 /**
  * Executes a single autonomous agent turn, yielding streaming events in a strict lifecycle sequence.
@@ -544,8 +545,7 @@ export async function* runTurn(
         let executionResult: unknown;
         let isToolError = false;
 
-        const deltaEvents: Array<{ chunk: string }> = [];
-        let isDone = false;
+        const progressQueue = new AsyncEventQueue<string>();
 
         const executePromise = (async () => {
           try {
@@ -555,7 +555,7 @@ export async function* runTurn(
               workingDirectory: config.workingDirectory,
               abortSignal: effectiveSignal,
               emitProgress: (chunk: string) => {
-                deltaEvents.push({ chunk });
+                progressQueue.push(chunk);
               },
             };
 
@@ -574,25 +574,17 @@ export async function* runTurn(
               error: error instanceof Error ? error.message : String(error),
             };
           } finally {
-            isDone = true;
+            progressQueue.close();
           }
         })();
 
-        while (!isDone || deltaEvents.length > 0) {
-          if (deltaEvents.length > 0) {
-            const delta = deltaEvents.shift()!;
-            yield {
-              type: 'toolExecutionDelta',
-              callId: toolCall.callId,
-              toolName: toolCall.toolName,
-              chunk: delta.chunk,
-            };
-          } else {
-            await Promise.race([
-              executePromise,
-              new Promise((resolve) => setTimeout(resolve, 5)),
-            ]);
-          }
+        for await (const chunk of progressQueue) {
+          yield {
+            type: 'toolExecutionDelta',
+            callId: toolCall.callId,
+            toolName: toolCall.toolName,
+            chunk,
+          };
         }
 
         executionResult = await executePromise;

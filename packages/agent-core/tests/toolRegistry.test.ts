@@ -9,6 +9,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "@amaranthic/greg-sdk";
+import { AsyncEventQueue } from "../src/engine/eventQueue.js";
 import {
   type AgentTool,
   BashTool,
@@ -70,6 +71,35 @@ describe("ToolExecutionQueue", () => {
       "Tool execution aborted",
     );
   });
+
+  it("prevents next queued task from running until aborted task settles", async () => {
+    const queue = new ToolExecutionQueue();
+    const controller = new AbortController();
+    let underlyingTaskSettled = false;
+    let nextTaskRanBeforeSettle = false;
+
+    const task1 = queue.run(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      underlyingTaskSettled = true;
+      return "task1";
+    }, controller.signal);
+
+    // Abort task 1 almost immediately
+    setTimeout(() => controller.abort(), 5);
+
+    await expect(task1).rejects.toThrow("Tool execution aborted");
+
+    // Task 2 should only run after task 1 has completely settled
+    await queue.run(async () => {
+      if (!underlyingTaskSettled) {
+        nextTaskRanBeforeSettle = true;
+      }
+      return "task2";
+    });
+
+    expect(nextTaskRanBeforeSettle).toBe(false);
+    expect(underlyingTaskSettled).toBe(true);
+  });
 });
 
 describe("ToolRegistry", () => {
@@ -129,6 +159,45 @@ describe("ToolRegistry", () => {
     expect(removed).toBe(true);
     expect(registry.has("ping")).toBe(false);
     expect(registry.unregister("ping")).toBe(false);
+  });
+
+  it("rejects duplicate tool registration unless allowOverride is explicitly true", () => {
+    const registry = new ToolRegistry({ includeDefaults: false });
+    const dummyTool: AgentTool = {
+      name: "customTool",
+      description: "Custom test tool",
+      inputSchema: z.object({}),
+      isMutating: false,
+      isConcurrencySafe: true,
+      execute: async () => ({ ok: true }),
+    };
+
+    registry.register(dummyTool);
+    expect(() => registry.register(dummyTool)).toThrow("already registered");
+
+    // Allows overriding when explicitly configured
+    expect(() =>
+      registry.register(dummyTool, { allowOverride: true }),
+    ).not.toThrow();
+  });
+
+  it("streams progress chunks via AsyncEventQueue without timer polling", async () => {
+    const queue = new AsyncEventQueue<string>();
+    const received: string[] = [];
+
+    const consumer = (async () => {
+      for await (const chunk of queue) {
+        received.push(chunk);
+      }
+    })();
+
+    queue.push("delta1");
+    queue.push("delta2");
+    queue.push("delta3");
+    queue.close();
+
+    await consumer;
+    expect(received).toEqual(["delta1", "delta2", "delta3"]);
   });
 
   it("converts registered tools to native AI SDK v7 tool definitions via toSdkTools", async () => {

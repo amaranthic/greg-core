@@ -10,3 +10,4 @@ export type {
 
 export { runTurn } from './runTurn.js';
 export { AgentEngine } from './AgentEngine.js';
+export { AsyncEventQueue } from './eventQueue.js';

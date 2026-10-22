@@ -94,12 +94,28 @@ export class ToolRegistry {
   }
 
   /**
-   * Registers a tool instance into the registry. If a tool with the same name exists,
-   * it is replaced.
+   * Registers a tool instance into the registry.
    *
    * @param agentTool - The AgentTool instance to register.
+   * @param options - Optional registration parameters, such as allowing explicit overrides.
+   * @throws Error if the tool name is empty, invalid, or already registered without allowOverride.
    */
-  public register(agentTool: AgentTool): void {
+  public register(
+    agentTool: AgentTool,
+    options?: { readonly allowOverride?: boolean },
+  ): void {
+    if (
+      !agentTool.name ||
+      typeof agentTool.name !== "string" ||
+      agentTool.name.trim().length === 0
+    ) {
+      throw new Error("Tool name must be a non-empty string.");
+    }
+    if (this.tools.has(agentTool.name) && !options?.allowOverride) {
+      throw new Error(
+        `Tool "${agentTool.name}" is already registered. Duplicate tool registration is not allowed. Pass { allowOverride: true } or unregister the tool first.`,
+      );
+    }
     this.tools.set(agentTool.name, agentTool);
   }
 
@@ -191,8 +207,9 @@ export class ToolRegistry {
    * Converts all registered tools into native Vercel AI SDK v7 `Tool` definitions
    * compatible with `streamText({ tools })` and `generateText({ tools })`.
    *
-   * Automatically wires concurrency queuing for non-concurrency-safe tools,
-   * races against abort signals, and structures errors for LLM self-correction.
+   * @warning This method attaches raw execute handlers that bypass the AgentEngine's
+   * authorization hooks, mutating checkpoints, and lifecycle progress events. It should
+   * primarily be used in isolated tests or custom unmanaged harnesses.
    *
    * @param options - Context options including threadId and workingDirectory.
    * @returns A map of tool names to AI SDK v7 `Tool` objects.
