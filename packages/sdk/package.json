@@ -27,11 +27,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/amaranthic/greg-sdk.git"
+    "url": "git+https://github.com/amaranthic/greg-core.git",
+    "directory": "packages/sdk"
   },
-  "homepage": "https://github.com/amaranthic/greg-sdk#readme",
+  "homepage": "https://github.com/amaranthic/greg-core/tree/main/packages/sdk#readme",
   "bugs": {
-    "url": "https://github.com/amaranthic/greg-sdk/issues"
+    "url": "https://github.com/amaranthic/greg-core/issues"
   },
   "keywords": [
     "ai",
