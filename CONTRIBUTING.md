@@ -1,196 +1,110 @@
-# Contributing to greg-core
+# Contributing to Hernex
 
-Thank you for your interest in contributing to **greg-core**!
+Thank you for your interest in contributing to **Hernex** (`@amaranthic/hernex`)!
 
-`greg-core` is the monorepo powering the Greg agent ecosystem—including **Greg Code**, **Greg Actions**, **Greg ACP**, and custom coding harnesses. It houses the foundational runtime SDK ([`@amaranthic/greg-sdk`](packages/sdk)) and upcoming agent core harnesses ([`@amaranthic/greg-agent-core`](packages/agent-core)). Built directly on top of [Vercel AI SDK v7](https://ai-sdk.dev), Greg provides dynamic single-string model resolution, mandatory per-request credentials, and zero-compromise SDK capability preservation.
+`@amaranthic/hernex` is the unified AI agent runtime, microkernel engine, and tool execution harness built directly on [Vercel AI SDK v7](https://ai-sdk.dev). It provides dynamic single-string model resolution, mandatory per-request credentials, autonomous multi-step turn orchestration, durable thread persistence, and content-addressed delta checkpointing.
 
-To maintain the highest level of code quality, security, and developer ergonomics, all contributors and AI agents must strictly follow the engineering guardrails and architecture contracts documented below.
+To maintain code quality, security, and developer ergonomics, all contributors and coding agents must strictly adhere to the engineering guardrails and architecture contracts documented below.
 
 ---
 
 ## 🏛️ Core Architectural Invariants
 
-Every contribution must preserve Greg's fundamental design principles:
+Every contribution must preserve Hernex's fundamental design principles:
 
 1. **The First-Slash Rule**:
    - Model strings are parsed by splitting strictly on the **first `/` only**.
    - The segment before the first slash is the `provider` identifier (e.g. `openai`, `anthropic`, `google`, `openrouter`, `vercelgateway`, `compatible`).
-   - All segments after the first slash form the `modelId` (e.g. `openrouter/openrouter/free`, `vercelgateway/openai/gpt-4o`, `compatible/org/model`) and must be preserved completely intact without secondary splitting.
+   - All segments after the first slash form the `modelId` (e.g. `openrouter/openrouter/free`, `compatible/org/model`) and are preserved completely intact without secondary splitting.
 
 2. **Mandatory Explicit Credentials**:
    - Every execution request **requires** non-empty `apiKey: string` and `baseUrl: string` values.
-   - No provider is exempt. Never introduce silent fallbacks to ambient `process.env` singletons in runtime calls.
-   - Base URLs must be adapted to provider-specific requirements (e.g. `baseURL` vs `baseUrl`) inside dedicated provider adapters.
+   - Never introduce silent fallbacks to ambient `process.env` singletons in runtime calls.
+   - Credential isolation: per-turn `model` cannot fall back across providers without per-turn credentials.
 
-3. **Zero Capability Loss (100% Feature Preservation)**:
-   - Greg SDK must never filter, truncate, or restrict native Vercel AI SDK capabilities.
-   - All native exports (`tool`, `isStepCount`, `ToolLoopAgent`, `AISDKError`, stream utilities, middleware) must be re-exported directly.
-   - All options (`providerOptions`, `onFinish`, `onChunk`, `onStepFinish`, `abortSignal`, `headers`, `telemetry`) must forward cleanly to native execution functions.
+3. **Curated Public Surface & Raw Subpath**:
+   - The root export (`@amaranthic/hernex`) exposes curated Hernex runtime wrappers, engine, tool registry, thread stores, and checkpoint stores.
+   - Raw native Vercel AI SDK capabilities are available via the opt-in subpath `@amaranthic/hernex/ai`.
 
-4. **Scope Boundaries**:
-   - Greg SDK is strictly a **Language & Agent Model Runtime** (text generation, live streaming, multi-step tool execution, structured outputs, embeddings).
-   - **No Image Generation (`generateImage`)**: Image synthesis (DALL-E, Imagen) and media generation (audio/video) are explicitly out of scope.
+4. **Security Boundaries & Path Guards**:
+   - All filesystem operations are strictly contained within the active workspace root via `resolvePathWithinWorkspace`.
+   - Bash execution sanitizes environment variables to avoid leaking ambient API keys or tokens.
 
 5. **Stateless Multi-Tenant Isolation**:
-   - Provider instances must be instantiated statelessly within the call frame. Never cache credentials in shared or module-level global variables.
+   - Provider instances are instantiated statelessly within the call frame. Never cache credentials in shared or module-level global variables.
 
 ---
 
 ## 📐 Strict Coding & Style Standards
 
 ### 1. Strict Identifier Casing
-- **`camelCase`**: Strictly required for all variables, properties, functions, methods, and file names (except for types/classes).
+- **`camelCase`**: Strictly required for all variables, properties, functions, and methods.
 - **`PascalCase`**: Strictly required for all classes, types, interfaces, and enums.
-- **No Other Casing Allowed**: `snake_case` is strictly forbidden in code identifiers across the entire codebase.
+- **No Other Casing Allowed**: `snake_case` is strictly forbidden in code identifiers across the codebase.
 
 ### 2. Comprehensive JSDoc Documentation
 - Every module, exported function, class, interface, type alias, parameter, and return value **must** be documented with rich JSDoc comments (`/** ... */`).
-- Comments must provide clear developer-facing context, detailed `@param` descriptions, `@returns` explanations, `@throws` documentation, and practical `@example` blocks where beneficial.
-- Preserve existing comments and docstrings when editing existing files.
+- Comments must provide clear context, detailed `@param` descriptions, `@returns` explanations, `@throws` documentation, and practical examples where beneficial.
 
 ### 3. Verification Over Assumptions
 - Never assume library APIs, package signatures, or options from outdated training data.
-- Always inspect installed package type declarations (`.d.ts`) directly inside `node_modules/` before integrating or modifying provider adapters.
+- Always inspect installed package type declarations (`.d.ts`) directly inside `node_modules/`.
 
 ---
 
 ## 🧪 Test Suite Architecture
 
-To maintain high velocity, clean maintenance, and deep test coverage, Greg enforces a disciplined test architecture:
+To maintain high velocity, clean maintenance, and deep test coverage:
 
-- **Strict File Limit**: Restrict the SDK test suite to a **maximum of 6 to 8 high-quality, high-coverage test files** located strictly within the package's `tests/` directory (`packages/sdk/tests/`).
-- **No Fragmented Test Files**: Do not create one-off, random, or micro-test files. Group related unit and integration tests into the canonical suites:
-  1. [`packages/sdk/tests/modelParsing.test.ts`](packages/sdk/tests/modelParsing.test.ts) — First-slash parsing, whitespace trimming, and malformed string errors.
-  2. [`packages/sdk/tests/credentialsValidation.test.ts`](packages/sdk/tests/credentialsValidation.test.ts) — Mandatory `apiKey` and `baseUrl` enforcement across all providers.
-  3. [`packages/sdk/tests/providerResolution.test.ts`](packages/sdk/tests/providerResolution.test.ts) — Provider registry lookups, official adapter instantiation, and Gateway prevention.
-  4. [`packages/sdk/tests/compatibleProvider.test.ts`](packages/sdk/tests/compatibleProvider.test.ts) — OpenAI-compatible routing and mock server verification.
-  5. [`packages/sdk/tests/runtimeExecution.test.ts`](packages/sdk/tests/runtimeExecution.test.ts) — `generateText`, `streamText`, `generateObject`, and option passthrough.
-  6. [`packages/sdk/tests/featurePreservation.test.ts`](packages/sdk/tests/featurePreservation.test.ts) — Automated parity audit asserting 100% export preservation from pinned `ai`.
-- **Test Runner**: All tests must execute natively and pass 100% under Bun:
+- **Strict File Limit**: Restrict the test suite to a **maximum of 6 to 8 high-quality, high-coverage test files** located strictly within `tests/`:
+  1. [`tests/model.test.ts`](tests/model.test.ts) — First-slash parsing, whitespace trimming, and credential validation.
+  2. [`tests/providers.test.ts`](tests/providers.test.ts) — Provider registry, custom provider registration, and mock HTTP endpoint.
+  3. [`tests/runtime.test.ts`](tests/runtime.test.ts) — `generateText`, `streamText`, `generateObject`, and `./ai` subpath.
+  4. [`tests/engine.test.ts`](tests/engine.test.ts) — Microkernel lifecycle, turn reservation, reasoning levels, and hook veto.
+  5. [`tests/tools.test.ts`](tests/tools.test.ts) — Built-in tools (`readFile`, `writeFile`, `editFile`, `bash`, `glob`, `grep`), path guards, and `ToolExecutionQueue`.
+  6. [`tests/storage.test.ts`](tests/storage.test.ts) — Home directory resolution, atomic writes, file locking, JSONL append/recovery, and lossless value codec.
+  7. [`tests/threads.test.ts`](tests/threads.test.ts) — `MemoryThreadStore` and `FileThreadStore` lifecycle and transcript reconstruction.
+  8. [`tests/checkpoints.test.ts`](tests/checkpoints.test.ts) — `FileCheckpointStore`, SHA-256 content-addressed blobs, and restore conflict detection.
+
+- **Test Runner**:
   ```bash
   bun test
   ```
 
 ---
 
-## 🛠️ Local Development Workflow
+## 🛠️ Development Workflow & Tooling Rules
 
-### Prerequisites
-- [Bun](https://bun.sh) &ge; 1.0 (workspace package manager and test runner)
-- [Node.js](https://nodejs.org) &ge; 22.0.0 (engine target)
-- Git
+- **Package Management**: Use `npm` strictly for package management (`npm install`, lockfile updates).
+- **Execution & Testing**: Use `bun` for script execution, typechecks, and tests (`bun test`, `bun run build`, `bun run typecheck`).
 
-### 1. Clone the Repository
+### Commands
 ```bash
-git clone https://github.com/amaranthic/greg-core.git
-cd greg-core
-```
-
-### 2. Install Workspace Dependencies
-```bash
-bun install
-```
-
-### 3. Run Typecheck
-Verify strict TypeScript compilation across all workspace packages with zero errors:
-```bash
+# Typecheck source and tests
 bun run typecheck
-```
 
-### 4. Run the Test Suite
-Execute all test suites with assertions:
-```bash
+# Run test suite
 bun test
-```
 
-### 5. Build Packages
-Compile TypeScript into distribution bundles:
-```bash
+# Build distribution bundle
 bun run build
 ```
-
----
-
-## 📁 Monorepo Structure
-
-```text
-greg-core/
-├── package.json              # Monorepo root manifest ("workspaces": ["packages/*"])
-├── README.md                 # Monorepo overview and package directory
-├── CONTRIBUTING.md           # Engineering standards & contributing guidelines
-├── LICENSE                   # MIT License
-└── packages/
-    ├── sdk/                  # @amaranthic/greg-sdk package
-    │   ├── package.json      # SDK package manifest
-    │   ├── tsconfig.json     # TypeScript configuration
-    │   ├── README.md         # SDK package documentation
-    │   ├── src/
-    │   │   ├── errors.ts             # Canonical runtime errors extending AISDKError
-    │   │   ├── index.ts              # Public API entrypoint & native ai re-exports
-    │   │   ├── modelResolver.ts      # First-slash parsing & credential validation
-    │   │   ├── providerRegistry.ts   # Central provider lookup & registration
-    │   │   ├── runtime.ts            # Core runtime execution (generateText, streamText, etc.)
-    │   │   ├── types.ts              # Derived TypeScript interfaces and options
-    │   │   └── providers/            # 13 dedicated provider adapters
-    │   │       ├── alibaba.ts
-    │   │       ├── anthropic.ts
-    │   │       ├── base.ts           # ProviderAdapter contract interface
-    │   │       ├── cohere.ts
-    │   │       ├── compatible.ts     # OpenAI-compatible / local LLM adapter
-    │   │       ├── deepseek.ts
-    │   │       ├── google.ts
-    │   │       ├── groq.ts
-    │   │       ├── mistral.ts
-    │   │       ├── openai.ts         # OpenAI adapter utilizing Responses API
-    │   │       ├── openrouter.ts
-    │   │       ├── togetherai.ts
-    │   │       ├── vercelGateway.ts  # Vercel AI Gateway adapter
-    │   │       └── xai.ts
-    │   └── tests/                    # Exactly 6 high-coverage test suites
-    │
-    └── agent-core/           # (Upcoming) @amaranthic/greg-agent-core package
-```
-
----
-
-## 🚀 Adding a New Provider Adapter to `packages/sdk`
-
-If you are adding a new official provider adapter:
-
-1. **Verify Official Package**: Ensure the provider has an official `@ai-sdk/<provider>` package available.
-2. **Create Provider Module**: Create `packages/sdk/src/providers/<providerName>.ts` implementing the `ProviderAdapter` interface from `base.ts`.
-3. **Enforce Casing & JSDoc**: Use strict `camelCase` for variables/functions and `PascalCase` for classes/types. Include rich JSDoc documentation with usage examples.
-4. **Register Adapter**: Import and register the adapter in `packages/sdk/src/providerRegistry.ts`.
-5. **Update Tests**: Add test coverage into `packages/sdk/tests/providerResolution.test.ts` verifying provider registry containment and model resolution.
-6. **Update Documentation**: Add the provider to the supported providers table in [`packages/sdk/README.md`](packages/sdk/README.md).
 
 ---
 
 ## 📝 Commit & Pull Request Guidelines
 
 ### Commit Message Convention
-We adhere to [Conventional Commits](https://www.conventionalcommits.org/):
-
+Adhere to [Conventional Commits](https://www.conventionalcommits.org/):
 - `feat:` A new feature or provider adapter
 - `fix:` A bug fix or error correction
-- `docs:` Documentation improvements or README changes
+- `docs:` Documentation improvements
 - `test:` Adding or refining test suites
-- `chore:` Dependency updates, build configurations, or workspace tooling
+- `chore:` Dependency updates or build tooling
 - `refactor:` Code refactoring without behavioral changes
-
-### Pull Request Checklist
-Before submitting a pull request, ensure:
-
-- [ ] `bun run typecheck` passes across all packages with zero type errors.
-- [ ] `bun test` passes 100% of tests with zero failures.
-- [ ] `bun run build` cleanly outputs to `dist/`.
-- [ ] Strict casing rules are respected (`camelCase` and `PascalCase` only).
-- [ ] Rich JSDoc comments are present on all new exported symbols.
-- [ ] Total test files in `tests/` remain within the 6 to 8 file limit.
-- [ ] No extraneous files, console logs, or debug code are committed.
 
 ---
 
 ## 📜 License
 
-By contributing to `greg-core`, you agree that your contributions will be licensed under the project's [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE).

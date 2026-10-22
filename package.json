@@ -1,30 +1,65 @@
 {
-  "name": "greg-core",
-  "private": true,
-  "description": "Monorepo for the Greg agent ecosystem, runtime SDK, and core harnesses",
+  "name": "@amaranthic/hernex",
+  "version": "0.1.0",
+  "description": "Unified AI agent runtime, microkernel engine, and tool harnesses built on Vercel AI SDK",
   "type": "module",
-  "workspaces": [
-    "packages/*"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./ai": {
+      "types": "./dist/ai.d.ts",
+      "import": "./dist/ai.js",
+      "default": "./dist/ai.js"
+    }
+  },
+  "files": [
+    "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "bun --filter '*' build",
-    "typecheck": "bun --filter '*' typecheck",
-    "test": "bun test"
+    "build": "tsc",
+    "typecheck": "tsc --project tsconfig.test.json",
+    "test": "bun test",
+    "clean": "rm -rf dist"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/amaranthic/greg-core.git"
+    "url": "git+https://github.com/amaranthic/harnex.git"
   },
-  "homepage": "https://github.com/amaranthic/greg-core#readme",
+  "homepage": "https://github.com/amaranthic/harnex#readme",
   "bugs": {
-    "url": "https://github.com/amaranthic/greg-core/issues"
+    "url": "https://github.com/amaranthic/harnex/issues"
   },
   "author": "Amaranthic",
   "license": "MIT",
+  "dependencies": {
+    "@ai-sdk/alibaba": "2.0.73",
+    "@ai-sdk/anthropic": "4.0.85",
+    "@ai-sdk/cohere": "4.0.66",
+    "@ai-sdk/deepseek": "3.0.70",
+    "@ai-sdk/gateway": "4.0.121",
+    "@ai-sdk/google": "4.0.102",
+    "@ai-sdk/groq": "4.0.67",
+    "@ai-sdk/mistral": "4.0.69",
+    "@ai-sdk/openai": "4.0.99",
+    "@ai-sdk/openai-compatible": "3.0.75",
+    "@ai-sdk/togetherai": "3.0.76",
+    "@ai-sdk/xai": "5.0.27",
+    "ai": "7.0.148",
+    "zod": "4.6.7"
+  },
   "devDependencies": {
+    "@types/bun": "^1.4.3",
     "@types/node": "26.6.5",
     "typescript": "7.0.2"
   }
