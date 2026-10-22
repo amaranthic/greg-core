@@ -37,7 +37,7 @@
   "author": "Amaranthic",
   "license": "MIT",
   "dependencies": {
-    "@amaranthic/greg-sdk": "workspace:*"
+    "@amaranthic/greg-sdk": "*"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
