@@ -72,7 +72,14 @@ export interface SdkToolAdapterOptions {
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, AgentTool>();
-  private readonly executionQueue = new ToolExecutionQueue();
+  private readonly queue = new ToolExecutionQueue();
+
+  /**
+   * Returns the underlying execution queue used to serialize non-concurrency-safe tools.
+   */
+  public get executionQueue(): ToolExecutionQueue {
+    return this.queue;
+  }
 
   /**
    * Constructs a new ToolRegistry instance, optionally pre-loading built-in tools.
@@ -159,6 +166,29 @@ export class ToolRegistry {
 
   /**
    * Converts all registered tools into native Vercel AI SDK v7 `Tool` definitions
+   * without execute handlers.
+   *
+   * This allows the autonomous engine turn loop to pass tool schemas to the model
+   * while retaining complete control over tool execution, permission checks,
+   * mutating file checkpoints, and progress streaming.
+   *
+   * @returns A map of tool names to AI SDK v7 `Tool` objects without execute handlers.
+   */
+  public toSdkToolDefinitions(): Record<string, Tool> {
+    const sdkTools: Record<string, Tool> = {};
+
+    for (const agentTool of this.tools.values()) {
+      sdkTools[agentTool.name] = tool({
+        description: agentTool.description,
+        inputSchema: agentTool.inputSchema as any,
+      });
+    }
+
+    return sdkTools;
+  }
+
+  /**
+   * Converts all registered tools into native Vercel AI SDK v7 `Tool` definitions
    * compatible with `streamText({ tools })` and `generateText({ tools })`.
    *
    * Automatically wires concurrency queuing for non-concurrency-safe tools,
@@ -214,7 +244,7 @@ export class ToolRegistry {
             return await runTool();
           }
 
-          return await this.executionQueue.run(runTool, effectiveSignal);
+          return await this.queue.run(runTool, effectiveSignal);
         },
       });
     }

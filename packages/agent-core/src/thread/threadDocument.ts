@@ -46,6 +46,20 @@ export interface ThreadTokenUsage {
 }
 
 /**
+ * Supported reasoning effort levels in the native Vercel AI SDK v7.
+ * Controls how much reasoning or thinking the model performs before generating a response.
+ */
+export type AgentReasoningLevel =
+  | 'provider-default'
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max';
+
+/**
  * Active model configuration for the thread.
  */
 export interface ThreadModelConfig {
@@ -53,6 +67,8 @@ export interface ThreadModelConfig {
   readonly modelId: string;
   /** Provider name extracted before the first slash. */
   readonly provider: string;
+  /** Optional AI SDK v7 top-level reasoning level setting. */
+  readonly reasoning?: AgentReasoningLevel;
   /** Optional reasoning effort setting ('low' | 'medium' | 'high'). */
   readonly reasoningEffort?: 'low' | 'medium' | 'high';
 }

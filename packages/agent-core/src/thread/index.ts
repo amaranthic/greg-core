@@ -4,6 +4,7 @@
  */
 
 export type {
+  AgentReasoningLevel,
   ThreadGitMeta,
   ThreadEnvironmentMeta,
   ThreadTokenUsage,
