@@ -439,4 +439,117 @@ describe("Built-in File & Shell Tools", () => {
     expect(grepRes.matches[0]?.lineNumber).toBe(1);
     expect(grepRes.matches[0]?.line).toContain("export const ALPHA = 42;");
   });
+
+  it("preserves literal regex substitution sequences in EditFileTool replacements", async () => {
+    const writeTool = new WriteFileTool();
+    const editTool = new EditFileTool();
+    const readTool = new ReadFileTool();
+    const context = {
+      threadId: "t1",
+      toolCallId: "c1",
+      workingDirectory: testWorkspace,
+    };
+
+    await writeTool.execute(
+      {
+        filePath: "literal.txt",
+        content: "price is PLACEHOLDER\ncode is TOKEN\n",
+      },
+      context,
+    );
+
+    // Replace PLACEHOLDER with "$100" (contains $1)
+    await editTool.execute(
+      {
+        filePath: "literal.txt",
+        oldString: "PLACEHOLDER",
+        newString: "$100",
+      },
+      context,
+    );
+
+    // Replace TOKEN with "$& and $$" (contains $& and $$)
+    await editTool.execute(
+      {
+        filePath: "literal.txt",
+        oldString: "TOKEN",
+        newString: "$& and $$",
+      },
+      context,
+    );
+
+    const readRes = await readTool.execute({ filePath: "literal.txt" }, context);
+    expect(readRes.content).toContain("price is $100");
+    expect(readRes.content).toContain("code is $& and $$");
+  });
+
+  it("rejects path traversal attempts outside workspace root", async () => {
+    const writeTool = new WriteFileTool();
+    const readTool = new ReadFileTool();
+    const context = {
+      threadId: "t1",
+      toolCallId: "c1",
+      workingDirectory: testWorkspace,
+    };
+
+    await expect(
+      writeTool.execute(
+        { filePath: "../outside.txt", content: "forbidden" },
+        context,
+      ),
+    ).rejects.toThrow("resolves outside");
+
+    await expect(
+      readTool.execute({ filePath: "../../etc/passwd" }, context),
+    ).rejects.toThrow("resolves outside");
+  });
+
+  it("sanitizes environment variables in BashTool, stripping API keys and secrets", async () => {
+    const bashTool = new BashTool();
+    const context = {
+      threadId: "t1",
+      toolCallId: "c1",
+      workingDirectory: testWorkspace,
+    };
+
+    process.env.ANTHROPIC_API_KEY = "super-secret-key";
+    process.env.TEST_AUTH_TOKEN = "secret-token";
+
+    try {
+      const res = await bashTool.execute({ command: "env" }, context);
+      expect(res.stdout).not.toContain("super-secret-key");
+      expect(res.stdout).not.toContain("secret-token");
+      expect(res.stdout).toContain("TERM=dumb");
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.TEST_AUTH_TOKEN;
+    }
+  });
+
+  it("rejects invalid regex patterns and sets isTruncated on single-file limits", async () => {
+    const grepTool = new GrepTool();
+    const context = {
+      threadId: "t1",
+      toolCallId: "c1",
+      workingDirectory: testWorkspace,
+    };
+
+    writeFileSync(
+      join(testWorkspace, "many.txt"),
+      Array.from({ length: 10 }, (_, i) => `match line ${i}`).join("\n"),
+    );
+
+    // Invalid regex throws error
+    await expect(
+      grepTool.execute({ pattern: "(unclosed group" }, context),
+    ).rejects.toThrow("Invalid regular expression");
+
+    // Single-file headLimit truncation sets isTruncated: true
+    const res = await grepTool.execute(
+      { pattern: "match line", path: "many.txt", headLimit: 3 },
+      context,
+    );
+    expect(res.matches.length).toBe(3);
+    expect(res.isTruncated).toBe(true);
+  });
 });

@@ -7,10 +7,10 @@
 
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
 import { z } from "@amaranthic/greg-sdk";
 import type { AgentTool } from "../AgentTool.js";
 import type { ToolExecutionContext } from "../ToolExecutionContext.js";
+import { resolvePathWithinWorkspace } from "../internal/pathGuard.js";
 import { READ_FILE_DESCRIPTION } from "./prompt.js";
 
 /**
@@ -87,20 +87,6 @@ export interface ReadFileOutput {
 }
 
 /**
- * Resolves a file path relative to the workspace directory.
- *
- * @param targetPath - The path specified in tool arguments.
- * @param rootDir - The workspace root directory.
- * @returns An absolute normalized file path.
- */
-function resolvePath(targetPath: string, rootDir: string): string {
-  if (isAbsolute(targetPath)) {
-    return resolve(targetPath);
-  }
-  return resolve(rootDir, targetPath);
-}
-
-/**
  * Built-in tool for inspecting file contents.
  */
 export class ReadFileTool
@@ -125,7 +111,10 @@ export class ReadFileTool
     parameters: z.infer<typeof readFileInputSchema>,
     context: ToolExecutionContext,
   ): Promise<ReadFileOutput> {
-    const fullPath = resolvePath(parameters.filePath, context.workingDirectory);
+    const fullPath = resolvePathWithinWorkspace(
+      parameters.filePath,
+      context.workingDirectory,
+    );
 
     for (const prefix of BLOCKING_DEVICE_PREFIXES) {
       if (fullPath.startsWith(prefix)) {
@@ -149,9 +138,17 @@ export class ReadFileTool
     }
 
     const fileStats = await stat(fullPath);
-    if (fileStats.isDirectory()) {
+    if (!fileStats.isFile()) {
       throw new Error(
-        `Path '${parameters.filePath}' is a directory, not a file. Use glob or list tools instead.`,
+        `Path '${parameters.filePath}' is not a regular file. Directory, device, socket, or non-regular paths cannot be read as text.`,
+      );
+    }
+
+    // Maximum file size cap before loading buffer into memory (20MB)
+    const MAX_FILE_BYTES = 20 * 1024 * 1024;
+    if (fileStats.size > MAX_FILE_BYTES) {
+      throw new Error(
+        `File '${parameters.filePath}' is too large to read into memory (${(fileStats.size / (1024 * 1024)).toFixed(1)}MB exceeds limit of 20MB).`,
       );
     }
 

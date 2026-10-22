@@ -7,10 +7,11 @@
 
 import { existsSync } from "node:fs";
 import { glob, readFile, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { z } from "@amaranthic/greg-sdk";
 import type { AgentTool } from "../AgentTool.js";
 import type { ToolExecutionContext } from "../ToolExecutionContext.js";
+import { resolvePathWithinWorkspace } from "../internal/pathGuard.js";
 import { GREP_DESCRIPTION } from "./prompt.js";
 
 /**
@@ -111,23 +112,6 @@ export interface GrepOutput {
 }
 
 /**
- * Resolves a search path relative to the workspace directory.
- *
- * @param targetPath - Optional file or directory path from parameters.
- * @param rootDir - The workspace root directory.
- * @returns An absolute path.
- */
-function resolvePath(targetPath: string | undefined, rootDir: string): string {
-  if (!targetPath) {
-    return rootDir;
-  }
-  if (isAbsolute(targetPath)) {
-    return resolve(targetPath);
-  }
-  return resolve(rootDir, targetPath);
-}
-
-/**
  * Built-in tool for regex searching across workspace files.
  */
 export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
@@ -151,7 +135,10 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
     context: ToolExecutionContext,
   ): Promise<GrepOutput> {
     const startTime = Date.now();
-    const targetPath = resolvePath(parameters.path, context.workingDirectory);
+    const targetPath = resolvePathWithinWorkspace(
+      parameters.path ?? ".",
+      context.workingDirectory,
+    );
 
     if (!existsSync(targetPath)) {
       throw new Error(`Target path not found: ${parameters.path ?? targetPath}`);
@@ -162,10 +149,10 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
     let regex: RegExp;
     try {
       regex = new RegExp(parameters.pattern, flags);
-    } catch {
-      // Escape special characters if pattern is not valid regex
-      const escaped = parameters.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      regex = new RegExp(escaped, flags);
+    } catch (error) {
+      throw new Error(
+        `Invalid regular expression pattern "${parameters.pattern}": ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     const matches: GrepMatch[] = [];
@@ -173,7 +160,7 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
     const limit = parameters.headLimit ?? DEFAULT_GREP_LIMIT;
 
     if (targetStats.isFile()) {
-      await this.searchFile(
+      isTruncated = await this.searchFile(
         targetPath,
         context.workingDirectory,
         regex,
@@ -255,6 +242,12 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
       if (lower.endsWith(ext)) {
         return false;
       }
+    }
+
+    // Skip excessively large files (>10MB) to protect memory
+    const fileStat = await stat(fullFilePath).catch(() => null);
+    if (!fileStat || fileStat.size > 10 * 1024 * 1024) {
+      return false;
     }
 
     let buffer: Buffer;

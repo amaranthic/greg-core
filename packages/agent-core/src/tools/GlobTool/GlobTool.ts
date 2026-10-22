@@ -7,10 +7,11 @@
 
 import { existsSync } from "node:fs";
 import { glob } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { z } from "@amaranthic/greg-sdk";
 import type { AgentTool } from "../AgentTool.js";
 import type { ToolExecutionContext } from "../ToolExecutionContext.js";
+import { resolvePathWithinWorkspace } from "../internal/pathGuard.js";
 import { GLOB_DESCRIPTION } from "./prompt.js";
 
 /**
@@ -61,23 +62,6 @@ export interface GlobOutput {
 }
 
 /**
- * Resolves a search path relative to the workspace directory.
- *
- * @param targetPath - Optional directory path from parameters.
- * @param rootDir - The workspace root directory.
- * @returns An absolute search directory path.
- */
-function resolveSearchDir(targetPath: string | undefined, rootDir: string): string {
-  if (!targetPath) {
-    return rootDir;
-  }
-  if (isAbsolute(targetPath)) {
-    return resolve(targetPath);
-  }
-  return resolve(rootDir, targetPath);
-}
-
-/**
  * Built-in tool for finding workspace files using glob patterns.
  */
 export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
@@ -101,7 +85,10 @@ export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
     context: ToolExecutionContext,
   ): Promise<GlobOutput> {
     const startTime = Date.now();
-    const searchDir = resolveSearchDir(parameters.path, context.workingDirectory);
+    const searchDir = resolvePathWithinWorkspace(
+      parameters.path ?? ".",
+      context.workingDirectory,
+    );
 
     if (!existsSync(searchDir)) {
       throw new Error(`Search directory not found: ${parameters.path ?? searchDir}`);

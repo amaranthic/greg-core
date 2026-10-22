@@ -5,9 +5,11 @@
  */
 
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { z } from "@amaranthic/greg-sdk";
 import type { AgentTool } from "../AgentTool.js";
 import type { ToolExecutionContext } from "../ToolExecutionContext.js";
+import { getSafeBashEnvironment } from "../internal/pathGuard.js";
 import { BASH_DESCRIPTION } from "./prompt.js";
 
 /**
@@ -87,13 +89,13 @@ export class BashTool implements AgentTool<typeof bashInputSchema, BashOutput> {
       let stderrBuffer = "";
       let isTruncated = false;
 
+      const stdoutDecoder = new StringDecoder("utf-8");
+      const stderrDecoder = new StringDecoder("utf-8");
+
       const child = spawn(parameters.command, {
         shell: true,
         cwd: context.workingDirectory,
-        env: {
-          ...process.env,
-          TERM: "dumb",
-        },
+        env: getSafeBashEnvironment(),
       });
 
       const killProcess = (): void => {
@@ -142,7 +144,7 @@ export class BashTool implements AgentTool<typeof bashInputSchema, BashOutput> {
       }
 
       child.stdout.on("data", (chunk: Buffer) => {
-        const text = chunk.toString("utf-8");
+        const text = stdoutDecoder.write(chunk);
         context.emitProgress?.(text);
 
         if (stdoutBuffer.length + text.length > MAX_BASH_OUTPUT_CHARACTERS) {
@@ -157,7 +159,7 @@ export class BashTool implements AgentTool<typeof bashInputSchema, BashOutput> {
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
-        const text = chunk.toString("utf-8");
+        const text = stderrDecoder.write(chunk);
         context.emitProgress?.(text);
 
         if (stderrBuffer.length + text.length > MAX_BASH_OUTPUT_CHARACTERS) {
@@ -192,6 +194,9 @@ export class BashTool implements AgentTool<typeof bashInputSchema, BashOutput> {
 
           const durationMs = Date.now() - startTime;
           const exitCode = code ?? (child.killed ? 130 : 0);
+
+          stdoutBuffer += stdoutDecoder.end();
+          stderrBuffer += stderrDecoder.end();
 
           if (isTruncated) {
             stdoutBuffer += "\n... [output truncated at 50,000 characters]";

@@ -6,10 +6,11 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname } from "node:path";
 import { z } from "@amaranthic/greg-sdk";
 import type { AgentTool } from "../AgentTool.js";
 import type { ToolExecutionContext } from "../ToolExecutionContext.js";
+import { resolvePathWithinWorkspace } from "../internal/pathGuard.js";
 import { WRITE_FILE_DESCRIPTION } from "./prompt.js";
 
 /**
@@ -32,20 +33,6 @@ export interface WriteFileOutput {
   readonly bytesWritten: number;
   readonly linesWritten: number;
   readonly status: "created" | "overwritten";
-}
-
-/**
- * Resolves a file path relative to the workspace directory.
- *
- * @param targetPath - The path specified in tool arguments.
- * @param rootDir - The workspace root directory.
- * @returns An absolute normalized file path.
- */
-function resolvePath(targetPath: string, rootDir: string): string {
-  if (isAbsolute(targetPath)) {
-    return resolve(targetPath);
-  }
-  return resolve(rootDir, targetPath);
 }
 
 /**
@@ -73,7 +60,10 @@ export class WriteFileTool
     parameters: z.infer<typeof writeFileInputSchema>,
     context: ToolExecutionContext,
   ): Promise<WriteFileOutput> {
-    const fullPath = resolvePath(parameters.filePath, context.workingDirectory);
+    const fullPath = resolvePathWithinWorkspace(
+      parameters.filePath,
+      context.workingDirectory,
+    );
     const parentDir = dirname(fullPath);
 
     if (!existsSync(parentDir)) {

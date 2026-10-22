@@ -6,10 +6,10 @@
 
 import { existsSync } from "node:fs";
 import { readFile, rename, writeFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
 import { z } from "@amaranthic/greg-sdk";
 import type { AgentTool } from "../AgentTool.js";
 import type { ToolExecutionContext } from "../ToolExecutionContext.js";
+import { resolvePathWithinWorkspace } from "../internal/pathGuard.js";
 import { EDIT_FILE_DESCRIPTION } from "./prompt.js";
 
 /**
@@ -43,20 +43,6 @@ export interface EditFileOutput {
 }
 
 /**
- * Resolves a file path relative to the workspace directory.
- *
- * @param targetPath - The path specified in tool arguments.
- * @param rootDir - The workspace root directory.
- * @returns An absolute normalized file path.
- */
-function resolvePath(targetPath: string, rootDir: string): string {
-  if (isAbsolute(targetPath)) {
-    return resolve(targetPath);
-  }
-  return resolve(rootDir, targetPath);
-}
-
-/**
  * Built-in tool for surgical in-place string replacements in files.
  */
 export class EditFileTool
@@ -87,7 +73,10 @@ export class EditFileTool
       );
     }
 
-    const fullPath = resolvePath(parameters.filePath, context.workingDirectory);
+    const fullPath = resolvePathWithinWorkspace(
+      parameters.filePath,
+      context.workingDirectory,
+    );
 
     if (!existsSync(fullPath)) {
       throw new Error(`File not found: ${parameters.filePath}`);
@@ -112,9 +101,11 @@ export class EditFileTool
       );
     }
 
+    // Function replacer avoids interpreting $&, $1, $$, etc. as special substitution patterns
+    const replacer = (): string => parameters.newString;
     const updatedContent = parameters.replaceAll
-      ? rawContent.replaceAll(parameters.oldString, parameters.newString)
-      : rawContent.replace(parameters.oldString, parameters.newString);
+      ? rawContent.replaceAll(parameters.oldString, replacer)
+      : rawContent.replace(parameters.oldString, replacer);
 
     const buffer = Buffer.from(updatedContent, "utf-8");
 
