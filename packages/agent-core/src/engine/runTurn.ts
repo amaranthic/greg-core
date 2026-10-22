@@ -47,6 +47,44 @@ import type { AgentEngineConfig, RunTurnOptions } from './engineConfig.js';
  * @param conversationMessages - Mutable array of thread conversation messages.
  * @returns An async generator yielding `AgentEvent`s.
  */
+/**
+ * Extracts normalized provider identifier from a model string if formatted as "provider/model_id".
+ */
+function getModelProvider(model: string | unknown): string | undefined {
+  if (typeof model === 'string') {
+    const slashIndex = model.indexOf('/');
+    if (slashIndex > 0) {
+      return model.slice(0, slashIndex).trim().toLowerCase();
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Combines multiple AbortSignal instances into a single signal.
+ */
+function combineAbortSignals(
+  ...signals: Array<AbortSignal | undefined | null>
+): AbortSignal | undefined {
+  const activeSignals = signals.filter((s): s is AbortSignal => Boolean(s));
+  if (activeSignals.length === 0) return undefined;
+  if (activeSignals.length === 1) return activeSignals[0];
+  if (typeof AbortSignal.any === 'function') {
+    return AbortSignal.any(activeSignals);
+  }
+  const controller = new AbortController();
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return controller.signal;
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), {
+      once: true,
+    });
+  }
+  return controller.signal;
+}
+
 export async function* runTurn(
   config: AgentEngineConfig,
   options: RunTurnOptions,
@@ -54,7 +92,12 @@ export async function* runTurn(
 ): AsyncGenerator<AgentEvent, void, void> {
   const turnIndex = options.turnIndex ?? 1;
   const userPrompt = options.userPrompt;
-  const effectiveSignal = options.abortSignal ?? config.abortSignal;
+  const turnAbortController = new AbortController();
+  const effectiveSignal = combineAbortSignals(
+    options.abortSignal,
+    config.abortSignal,
+    turnAbortController.signal,
+  );
   const maxSteps = options.maxSteps ?? config.maxSteps ?? 25;
   const reasoning = options.reasoning ?? config.reasoning;
 
@@ -82,8 +125,23 @@ export async function* runTurn(
 
   let checkpointSequence = 1;
   let finishReason: TurnFinishReason = 'completed';
+  const initialHistoryLength = conversationMessages.length;
 
   try {
+    // Credential invariant check (B-04): ensure per-turn model cannot silently reuse another provider's credentials
+    const configProvider = getModelProvider(config.model);
+    const overrideProvider = getModelProvider(options.model);
+    if (
+      overrideProvider &&
+      configProvider &&
+      overrideProvider !== configProvider &&
+      (!options.apiKey || !options.baseUrl)
+    ) {
+      throw new Error(
+        `Per-turn model override changed provider from "${configProvider}" to "${overrideProvider}", but explicit per-turn credentials (apiKey and baseUrl) were not supplied. Falling back across different providers is forbidden.`,
+      );
+    }
+
     // 1. Emit 'turnStarted'
     yield {
       type: 'turnStarted',
@@ -101,6 +159,16 @@ export async function* runTurn(
       });
 
       if (preTurnResult) {
+        if (preTurnResult.veto) {
+          finishReason = 'vetoed';
+          yield {
+            type: 'turnFinished',
+            turnIndex,
+            finishReason,
+            totalUsage: buildTotalUsage(),
+          };
+          return;
+        }
         if (preTurnResult.userPrompt) {
           effectiveUserPrompt = preTurnResult.userPrompt;
         }
@@ -291,46 +359,122 @@ export async function* runTurn(
       }> = [];
 
       for (const toolCall of proposedToolCalls) {
-        const isMutating = config.tools.isMutating(toolCall.toolName);
+        const agentTool = config.tools.resolve(toolCall.toolName);
+        if (!agentTool) {
+          const denialResult = {
+            isError: true,
+            error: `Tool "${toolCall.toolName}" is not registered in ToolRegistry.`,
+          };
+
+          yield {
+            type: 'toolExecutionFinished',
+            callId: toolCall.callId,
+            toolName: toolCall.toolName,
+            result: denialResult,
+            isError: true,
+            durationMs: 0,
+          };
+
+          toolResults.push({
+            toolCallId: toolCall.callId,
+            toolName: toolCall.toolName,
+            result: denialResult,
+            isError: true,
+          });
+          continue;
+        }
+
+        // Validate tool input parameters before authorization hooks
+        let parsedParameters: unknown;
+        try {
+          parsedParameters = agentTool.inputSchema.parse(toolCall.parameters);
+        } catch (validationError) {
+          const schemaErrorResult = {
+            isError: true,
+            error: `Schema validation error for tool "${toolCall.toolName}": ${validationError instanceof Error ? validationError.message : String(validationError)}`,
+          };
+
+          yield {
+            type: 'toolExecutionFinished',
+            callId: toolCall.callId,
+            toolName: toolCall.toolName,
+            result: schemaErrorResult,
+            isError: true,
+            durationMs: 0,
+          };
+
+          toolResults.push({
+            toolCallId: toolCall.callId,
+            toolName: toolCall.toolName,
+            result: schemaErrorResult,
+            isError: true,
+          });
+          continue;
+        }
+
+        const isMutating = agentTool.isMutating;
         let isAllowed = true;
         let denialReason = 'Tool execution was denied';
 
         if (config.hooks?.onAuthorizeTool) {
-          const decision = await config.hooks.onAuthorizeTool({
-            toolName: toolCall.toolName,
-            parameters: toolCall.parameters,
-            isMutating,
-            workingDirectory: config.workingDirectory,
-          });
-
-          if (decision.decision === 'deny') {
-            isAllowed = false;
-            denialReason = decision.reason;
-          } else if (decision.decision === 'askUser') {
-            let resolvedDecision: 'allow' | 'deny' | 'allowAlways' = 'deny';
-            yield {
-              type: 'toolPermissionRequested',
-              callId: toolCall.callId,
+          try {
+            const decision = await config.hooks.onAuthorizeTool({
               toolName: toolCall.toolName,
-              parameters: toolCall.parameters,
+              parameters: parsedParameters,
               isMutating,
-              resolve: (d: 'allow' | 'deny' | 'allowAlways') => {
-                resolvedDecision = d;
-              },
-            };
+              workingDirectory: config.workingDirectory,
+            });
 
-            yield {
-              type: 'toolPermissionResolved',
-              callId: toolCall.callId,
-              toolName: toolCall.toolName,
-              decision: resolvedDecision,
-            };
-
-            if (resolvedDecision === 'deny') {
+            if (decision.decision === 'deny') {
               isAllowed = false;
-              denialReason = 'Tool execution was denied by user';
+              denialReason = decision.reason;
+            } else if (decision.decision === 'askUser') {
+              let resolver!: (decision: 'allow' | 'deny' | 'allowAlways') => void;
+              const decisionPromise = new Promise<'allow' | 'deny' | 'allowAlways'>((resolve) => {
+                resolver = resolve;
+              });
+
+              yield {
+                type: 'toolPermissionRequested',
+                callId: toolCall.callId,
+                toolName: toolCall.toolName,
+                parameters: parsedParameters,
+                isMutating,
+                resolve: resolver,
+              };
+
+              const userDecision = await Promise.race([
+                decisionPromise,
+                new Promise<'deny'>((resolve) => {
+                  if (effectiveSignal) {
+                    if (effectiveSignal.aborted) resolve('deny');
+                    effectiveSignal.addEventListener('abort', () => resolve('deny'), {
+                      once: true,
+                    });
+                  }
+                }),
+              ]);
+
+              yield {
+                type: 'toolPermissionResolved',
+                callId: toolCall.callId,
+                toolName: toolCall.toolName,
+                decision: userDecision,
+              };
+
+              if (userDecision === 'deny') {
+                isAllowed = false;
+                denialReason = 'Tool execution was denied by user';
+              }
             }
+          } catch (authError) {
+            isAllowed = false;
+            denialReason = `Authorization check failed: ${authError instanceof Error ? authError.message : String(authError)}`;
           }
+        } else if (isMutating) {
+          // Mutating tools fail closed when no authorization hook is provided
+          isAllowed = false;
+          denialReason = `Mutating tool "${toolCall.toolName}" requires an explicit authorization policy.`;
         }
 
         if (!isAllowed) {
@@ -361,7 +505,7 @@ export async function* runTurn(
         if (isMutating && config.checkpoint?.enabled !== false) {
           const checkpointId = `cp_${Date.now()}_${randomUUID().slice(0, 8)}`;
           const filesTouched: string[] = [];
-          const rawParams = toolCall.parameters as Record<string, unknown> | null;
+          const rawParams = parsedParameters as Record<string, unknown> | null;
           if (rawParams && typeof rawParams.filePath === 'string') {
             filesTouched.push(rawParams.filePath);
           } else if (rawParams && typeof rawParams.path === 'string') {
@@ -397,71 +541,61 @@ export async function* runTurn(
           timestamp: startTime,
         };
 
-        const agentTool = config.tools.resolve(toolCall.toolName);
         let executionResult: unknown;
         let isToolError = false;
 
-        if (!agentTool) {
-          executionResult = {
-            isError: true,
-            error: `Tool "${toolCall.toolName}" is not registered in ToolRegistry.`,
-          };
-          isToolError = true;
-        } else {
-          const deltaEvents: Array<{ chunk: string }> = [];
-          let isDone = false;
+        const deltaEvents: Array<{ chunk: string }> = [];
+        let isDone = false;
 
-          const executePromise = (async () => {
-            try {
-              const parsedParameters = agentTool.inputSchema.parse(toolCall.parameters);
-              const executionContext: ToolExecutionContext = {
-                threadId: config.threadId,
-                toolCallId: toolCall.callId,
-                workingDirectory: config.workingDirectory,
-                abortSignal: effectiveSignal,
-                emitProgress: (chunk: string) => {
-                  deltaEvents.push({ chunk });
-                },
-              };
+        const executePromise = (async () => {
+          try {
+            const executionContext: ToolExecutionContext = {
+              threadId: config.threadId,
+              toolCallId: toolCall.callId,
+              workingDirectory: config.workingDirectory,
+              abortSignal: effectiveSignal,
+              emitProgress: (chunk: string) => {
+                deltaEvents.push({ chunk });
+              },
+            };
 
-              if (agentTool.isConcurrencySafe) {
-                return await agentTool.execute(parsedParameters, executionContext);
-              }
-
-              return await config.tools.executionQueue.run(
-                () => agentTool.execute(parsedParameters, executionContext),
-                effectiveSignal,
-              );
-            } catch (error) {
-              isToolError = true;
-              return {
-                isError: true,
-                error: error instanceof Error ? error.message : String(error),
-              };
-            } finally {
-              isDone = true;
+            if (agentTool.isConcurrencySafe) {
+              return await agentTool.execute(parsedParameters, executionContext);
             }
-          })();
 
-          while (!isDone || deltaEvents.length > 0) {
-            if (deltaEvents.length > 0) {
-              const delta = deltaEvents.shift()!;
-              yield {
-                type: 'toolExecutionDelta',
-                callId: toolCall.callId,
-                toolName: toolCall.toolName,
-                chunk: delta.chunk,
-              };
-            } else {
-              await Promise.race([
-                executePromise,
-                new Promise((resolve) => setTimeout(resolve, 5)),
-              ]);
-            }
+            return await config.tools.executionQueue.run(
+              () => agentTool.execute(parsedParameters, executionContext),
+              effectiveSignal,
+            );
+          } catch (error) {
+            isToolError = true;
+            return {
+              isError: true,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          } finally {
+            isDone = true;
           }
+        })();
 
-          executionResult = await executePromise;
+        while (!isDone || deltaEvents.length > 0) {
+          if (deltaEvents.length > 0) {
+            const delta = deltaEvents.shift()!;
+            yield {
+              type: 'toolExecutionDelta',
+              callId: toolCall.callId,
+              toolName: toolCall.toolName,
+              chunk: delta.chunk,
+            };
+          } else {
+            await Promise.race([
+              executePromise,
+              new Promise((resolve) => setTimeout(resolve, 5)),
+            ]);
+          }
         }
+
+        executionResult = await executePromise;
 
         const durationMs = Date.now() - startTime;
         yield {
@@ -511,41 +645,21 @@ export async function* runTurn(
         usage: stepUsage,
       };
 
-      // Call onThreadUpdate
+      // Call onThreadUpdate with an immutable snapshot
       if (config.hooks?.onThreadUpdate) {
         await config.hooks.onThreadUpdate({
           threadId: config.threadId,
-          messages: conversationMessages,
+          messages: [...conversationMessages],
           turnIndex,
           usage: buildTotalUsage(),
         });
-      }
-
-      // Check onShouldStop
-      if (config.hooks?.onShouldStop) {
-        const stopDecision = await config.hooks.onShouldStop({
-          turnIndex,
-          finishReason: 'completed',
-          transcript: conversationMessages,
-        });
-
-        if (stopDecision.shouldStop) {
-          finishReason = 'completed';
-          yield {
-            type: 'turnFinished',
-            turnIndex,
-            finishReason,
-            totalUsage: buildTotalUsage(),
-          };
-          return;
-        }
       }
 
       stepIndex++;
     }
 
     // Exceeded maxSteps
-    finishReason = 'maxTurns';
+    finishReason = 'maxSteps';
     yield {
       type: 'turnFinished',
       turnIndex,
@@ -553,6 +667,9 @@ export async function* runTurn(
       totalUsage: buildTotalUsage(),
     };
   } catch (error) {
+    // Roll back in-progress conversation additions if unhandled exception occurs
+    conversationMessages.length = initialHistoryLength;
+
     const errorInstance = error instanceof Error ? error : new Error(String(error));
     finishReason = 'error';
 
@@ -580,11 +697,15 @@ export async function* runTurn(
     };
   } finally {
     if (config.hooks?.onPostTurn) {
-      await config.hooks.onPostTurn({
-        turnIndex,
-        finishReason,
-        totalUsage: buildTotalUsage(),
-      });
+      try {
+        await config.hooks.onPostTurn({
+          turnIndex,
+          finishReason,
+          totalUsage: buildTotalUsage(),
+        });
+      } catch (cleanupError) {
+        // Collect cleanup error without masking primary turn outcome
+      }
     }
   }
 }

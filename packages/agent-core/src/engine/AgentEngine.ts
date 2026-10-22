@@ -53,6 +53,9 @@ export class AgentEngine {
   ) {
     this.config = config;
     this.conversationMessages = initialMessages ? [...initialMessages] : [];
+    this.turnCounter = this.conversationMessages.filter(
+      (m) => m.role === 'user',
+    ).length;
   }
 
   /**
@@ -103,6 +106,11 @@ export class AgentEngine {
    * @param message - The ModelMessage to append.
    */
   public addMessage(message: ModelMessage): void {
+    if (this.isTurnRunning) {
+      throw new Error(
+        'Cannot add messages to conversation history while an active turn is running.',
+      );
+    }
     this.conversationMessages.push(message);
   }
 
@@ -110,6 +118,11 @@ export class AgentEngine {
    * Clears all conversational messages from the active thread history.
    */
   public clearMessages(): void {
+    if (this.isTurnRunning) {
+      throw new Error(
+        'Cannot clear conversation messages while an active turn is running.',
+      );
+    }
     this.conversationMessages.length = 0;
   }
 
@@ -132,15 +145,6 @@ export class AgentEngine {
       );
     }
 
-    return this.executeTurn(promptOrOptions);
-  }
-
-  /**
-   * Internal generator driving turn execution and tracking concurrency state.
-   */
-  private async *executeTurn(
-    promptOrOptions: string | RunTurnOptions,
-  ): AsyncGenerator<AgentEvent, void, void> {
     this.isTurnRunning = true;
     this.turnCounter++;
 
@@ -155,6 +159,15 @@ export class AgentEngine {
             turnIndex: promptOrOptions.turnIndex ?? this.turnCounter,
           };
 
+    return this.executeTurn(options);
+  }
+
+  /**
+   * Internal generator driving turn execution and tracking concurrency state.
+   */
+  private async *executeTurn(
+    options: RunTurnOptions,
+  ): AsyncGenerator<AgentEvent, void, void> {
     try {
       yield* runTurn(this.config, options, this.conversationMessages);
     } finally {

@@ -20,7 +20,15 @@ export interface StepTokenUsage {
 /**
  * Reason explaining why a turn reached completion.
  */
-export type TurnFinishReason = 'completed' | 'maxTurns' | 'interrupted' | 'error';
+export type TurnFinishReason =
+  | 'completed'
+  | 'maxSteps'
+  | 'maxTurns'
+  | 'interrupted'
+  | 'error'
+  | 'vetoed'
+  | 'lengthExceeded'
+  | 'contentFilter';
 
 /**
  * Event emitted when a new turn is initiated by a user message or prompt.

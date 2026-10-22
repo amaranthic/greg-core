@@ -23,6 +23,10 @@ export interface PreTurnResult {
   readonly userPrompt?: string;
   /** Additional system instructions to append for this turn. */
   readonly injectedInstructions?: string;
+  /** Whether to veto and cancel the turn before executing. */
+  readonly veto?: boolean;
+  /** Reason for vetoing the turn. */
+  readonly vetoReason?: string;
 }
 
 /**

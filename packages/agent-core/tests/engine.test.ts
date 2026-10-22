@@ -90,9 +90,12 @@ describe('AgentEngine Core Invariants', () => {
     expect(engine.threadId).toBe('th_test_123');
     expect(engine.workingDirectory).toBe('/tmp/test_workspace');
     expect(engine.tools).toBe(tools);
-    expect(engine.currentTurn).toBe(0);
+    expect(engine.currentTurn).toBe(1);
     expect(engine.reasoning).toBe('high');
     expect(engine.messages.length).toBe(2);
+
+    const freshEngine = new AgentEngine(createBaseConfig());
+    expect(freshEngine.currentTurn).toBe(0);
 
     // Append message
     engine.addMessage({ role: 'user', content: 'New message' });
@@ -124,13 +127,25 @@ describe('AgentEngine Core Invariants', () => {
   it('throws an error if a second turn is started concurrently on the same engine instance', async () => {
     const engine = new AgentEngine(createBaseConfig());
 
-    // Mock internal turn execution to simulate an active turn
-    (engine as any).isTurnRunning = true;
+    // Synchronously acquire first turn without iterating
+    const turn1 = engine.runTurn('First turn');
+    expect(turn1).toBeDefined();
 
     expect(() => {
-      // Calling runTurn should immediately throw because turn is in progress
+      // Calling runTurn should immediately throw synchronously because turn 1 reserved the turn
       engine.runTurn('Concurrent request');
     }).toThrow('already running an active turn');
+  });
+
+  it('correctly initializes turnCounter based on historical user messages', () => {
+    const history: ModelMessage[] = [
+      { role: 'user', content: 'Turn 1 prompt' },
+      { role: 'assistant', content: 'Turn 1 answer' },
+      { role: 'user', content: 'Turn 2 prompt' },
+      { role: 'assistant', content: 'Turn 2 answer' },
+    ];
+    const engine = new AgentEngine(createBaseConfig(), history);
+    expect(engine.currentTurn).toBe(2);
   });
 
   it('converts registered tools to schema definitions without execute handlers for engine control', () => {
@@ -241,5 +256,58 @@ describe('AgentEngine Core Invariants', () => {
       'threadUpdate:th_test_123:0',
       'postTurn:completed',
     ]);
+  });
+
+  it('rejects provider override when matching per-turn credentials are missing', async () => {
+    const engine = new AgentEngine(
+      createBaseConfig({
+        model: 'anthropic/claude-3-7-sonnet',
+        apiKey: 'anthropic-key',
+        baseUrl: 'https://api.anthropic.com/v1',
+      }),
+    );
+
+    const turnEvents = engine.runTurn({
+      userPrompt: 'Test provider mismatch',
+      model: 'google/gemini-2.5-flash-lite',
+      // Missing per-turn apiKey and baseUrl for google
+    });
+
+    const events: any[] = [];
+    for await (const event of turnEvents) {
+      events.push(event);
+    }
+
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.error.message).toContain('Falling back across different providers is forbidden');
+
+    const finishEvent = events.find((e) => e.type === 'turnFinished');
+    expect(finishEvent).toBeDefined();
+    expect(finishEvent.finishReason).toBe('error');
+  });
+
+  it('honors pre-turn hook veto without appending user messages or starting model steps', async () => {
+    const engine = new AgentEngine(
+      createBaseConfig({
+        hooks: {
+          onPreTurn: () => ({
+            veto: true,
+            vetoReason: 'User rate limit exceeded',
+          }),
+        },
+      }),
+    );
+
+    const events: any[] = [];
+    for await (const event of engine.runTurn('Forbidden prompt')) {
+      events.push(event);
+    }
+
+    expect(events.map((e) => e.type)).toEqual(['turnStarted', 'turnFinished']);
+    const finishEvent = events.find((e) => e.type === 'turnFinished');
+    expect(finishEvent.finishReason).toBe('vetoed');
+    // Ensure message history was NOT touched
+    expect(engine.messages.length).toBe(0);
   });
 });
