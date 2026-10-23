@@ -176,8 +176,6 @@ export type {
   TokenDeltaEvent,
   ThoughtDeltaEvent,
   ToolCallProposedEvent,
-  ToolPermissionRequestedEvent,
-  ToolPermissionResolvedEvent,
   ToolExecutionStartedEvent,
   ToolExecutionDeltaEvent,
   ToolExecutionFinishedEvent,

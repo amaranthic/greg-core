@@ -22,8 +22,7 @@ export interface ToolAuthorizeContext {
  */
 export type PermissionDecision =
   | { readonly decision: 'allow' }
-  | { readonly decision: 'deny'; readonly reason: string }
-  | { readonly decision: 'askUser' };
+  | { readonly decision: 'deny'; readonly reason: string };
 
 /**
  * Hook invoked before tool execution to determine authorization.

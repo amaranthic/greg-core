@@ -9,8 +9,6 @@ import type {
   ToolExecutionDeltaEvent,
   ToolExecutionFinishedEvent,
   ToolExecutionStartedEvent,
-  ToolPermissionRequestedEvent,
-  ToolPermissionResolvedEvent,
 } from './toolEvents.js';
 import type {
   StepFinishedEvent,
@@ -31,8 +29,6 @@ export type {
 
 export type {
   ToolCallProposedEvent,
-  ToolPermissionRequestedEvent,
-  ToolPermissionResolvedEvent,
   ToolExecutionStartedEvent,
   ToolExecutionDeltaEvent,
   ToolExecutionFinishedEvent,
@@ -82,8 +78,6 @@ export type AgentEvent =
   | TokenDeltaEvent
   | ThoughtDeltaEvent
   | ToolCallProposedEvent
-  | ToolPermissionRequestedEvent
-  | ToolPermissionResolvedEvent
   | ToolExecutionStartedEvent
   | ToolExecutionDeltaEvent
   | ToolExecutionFinishedEvent

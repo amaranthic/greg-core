@@ -482,8 +482,6 @@ Hernex splits agent communication into two independent channels:
 | `tokenDelta` | `TokenDeltaEvent` | Emitted when assistant text arrives | `text`, `stepIndex`, `turnIndex` |
 | `thoughtDelta` | `ThoughtDeltaEvent` | Emitted when model reasoning arrives | `delta`, `stepIndex`, `turnIndex` |
 | `toolCallProposed` | `ToolCallProposedEvent` | Emitted when model proposes a tool | `toolCallId`, `toolName`, `input` |
-| `toolPermissionRequested` | `ToolPermissionRequestedEvent` | Emitted when awaiting authorization | `toolCallId`, `toolName`, `input` |
-| `toolPermissionResolved` | `ToolPermissionResolvedEvent` | Emitted after authorization decision | `toolCallId`, `toolName`, `approved`, `reason` |
 | `toolExecutionStarted` | `ToolExecutionStartedEvent` | Emitted when tool begins running | `toolCallId`, `toolName`, `input` |
 | `toolExecutionDelta` | `ToolExecutionDeltaEvent` | Emitted during command stdout/stderr | `toolCallId`, `streamType`, `chunk` |
 | `toolExecutionFinished` | `ToolExecutionFinishedEvent` | Emitted when tool finishes | `toolCallId`, `toolName`, `output`, `durationMs`, `isError` |

@@ -430,44 +430,6 @@ export async function* runTurn(
             if (decision.decision === 'deny') {
               isAllowed = false;
               denialReason = decision.reason;
-            } else if (decision.decision === 'askUser') {
-              let resolver!: (decision: 'allow' | 'deny' | 'allowAlways') => void;
-              const decisionPromise = new Promise<'allow' | 'deny' | 'allowAlways'>((resolve) => {
-                resolver = resolve;
-              });
-
-              yield {
-                type: 'toolPermissionRequested',
-                callId: toolCall.callId,
-                toolName: toolCall.toolName,
-                parameters: parsedParameters,
-                isMutating,
-                resolve: resolver,
-              };
-
-              const userDecision = await Promise.race([
-                decisionPromise,
-                new Promise<'deny'>((resolve) => {
-                  if (effectiveSignal) {
-                    if (effectiveSignal.aborted) resolve('deny');
-                    effectiveSignal.addEventListener('abort', () => resolve('deny'), {
-                      once: true,
-                    });
-                  }
-                }),
-              ]);
-
-              yield {
-                type: 'toolPermissionResolved',
-                callId: toolCall.callId,
-                toolName: toolCall.toolName,
-                decision: userDecision,
-              };
-
-              if (userDecision === 'deny') {
-                isAllowed = false;
-                denialReason = 'Tool execution was denied by user';
-              }
             }
           } catch (authError) {
             isAllowed = false;

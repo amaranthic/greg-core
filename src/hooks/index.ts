@@ -71,7 +71,7 @@ export type {
  * ```typescript
  * const hooks: AgentHooks = {
  *   onAuthorizeTool: async ({ toolName, isMutating }) => {
- *     return isMutating ? { decision: 'askUser' } : { decision: 'allow' };
+ *     return isMutating ? { decision: 'deny', reason: 'Mutating tools disabled' } : { decision: 'allow' };
  *   },
  *   onThreadUpdate: async ({ threadId, messages }) => {
  *     await saveThread(threadId, messages);

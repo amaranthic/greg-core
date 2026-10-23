@@ -18,38 +18,6 @@ export interface ToolCallProposedEvent {
 }
 
 /**
- * Event emitted when a tool invocation requires permission authorization from the product or user.
- */
-export interface ToolPermissionRequestedEvent {
-  /** Discriminant event type. */
-  readonly type: 'toolPermissionRequested';
-  /** Unique identifier for the tool call under authorization. */
-  readonly callId: string;
-  /** Name of the tool requiring authorization. */
-  readonly toolName: string;
-  /** Parameters passed to the tool. */
-  readonly parameters: unknown;
-  /** Whether the tool potentially mutates files or host environment state. */
-  readonly isMutating: boolean;
-  /** Callback to resolve authorization from the product. */
-  readonly resolve: (decision: 'allow' | 'deny' | 'allowAlways') => void;
-}
-
-/**
- * Event emitted after a tool permission check has been resolved.
- */
-export interface ToolPermissionResolvedEvent {
-  /** Discriminant event type. */
-  readonly type: 'toolPermissionResolved';
-  /** Unique identifier for the tool call. */
-  readonly callId: string;
-  /** Name of the tool. */
-  readonly toolName: string;
-  /** Outcome of the permission authorization check. */
-  readonly decision: 'allow' | 'deny' | 'allowAlways';
-}
-
-/**
  * Event emitted immediately before a tool starts executing on the host.
  */
 export interface ToolExecutionStartedEvent {
