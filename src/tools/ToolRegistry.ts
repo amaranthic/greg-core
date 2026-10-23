@@ -148,28 +148,6 @@ export class ToolRegistry {
   }
 
   /**
-   * Determines if a registered tool is marked as mutating.
-   *
-   * @param name - Name of the tool to inspect.
-   * @returns True if the tool is mutating, false if read-only or unknown.
-   */
-  public isMutating(name: string): boolean {
-    const agentTool = this.tools.get(name);
-    return agentTool ? agentTool.isMutating : false;
-  }
-
-  /**
-   * Determines if a registered tool is marked as concurrency-safe.
-   *
-   * @param name - Name of the tool to inspect.
-   * @returns True if concurrency-safe, false if non-concurrency-safe or unknown.
-   */
-  public isConcurrencySafe(name: string): boolean {
-    const agentTool = this.tools.get(name);
-    return agentTool ? agentTool.isConcurrencySafe : false;
-  }
-
-  /**
    * Converts all registered tools into native Vercel AI SDK v7 `Tool` definitions
    * without execute handlers.
    *
@@ -246,11 +224,7 @@ export class ToolRegistry {
             }
           };
 
-          if (agentTool.isConcurrencySafe) {
-            return await runTool();
-          }
-
-          return await this.queue.run(runTool, effectiveSignal);
+          return await runTool();
         },
       });
     }

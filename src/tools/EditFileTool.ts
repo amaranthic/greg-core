@@ -4,8 +4,10 @@
  * @packageDocumentation
  */
 
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { z } from "zod";
 import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
@@ -53,14 +55,13 @@ export class EditFileTool
   public readonly name = EditFileTool.toolName;
   public readonly description = editFileDescription;
   public readonly inputSchema = editFileInputSchema;
-  public readonly isMutating = true;
-  public readonly isConcurrencySafe = false;
 
   /**
-   * Executes the in-place string replacement operation.
+   * Executes the in-place string replacement operation, capturing a content-addressed
+   * delta checkpoint if checkpointing is enabled on the session.
    *
    * @param parameters - Validated parameters containing filePath, oldString, newString, replaceAll.
-   * @param context - The execution context with workingDirectory.
+   * @param context - The execution context with workingDirectory and checkpoint store.
    * @returns A promise resolving to the structured edit result.
    */
   public async execute(
@@ -101,6 +102,17 @@ export class EditFileTool
       );
     }
 
+    let beforeHash: string | undefined;
+    if (context.isCheckpointEnabled && context.checkpointStore) {
+      try {
+        beforeHash = await context.checkpointStore.storeBlob(
+          Buffer.from(rawContent, "utf-8"),
+        );
+      } catch {
+        // Silently continue if pre-mutation blob storage fails
+      }
+    }
+
     // Function replacer avoids interpreting $&, $1, $$, etc. as special substitution patterns
     const replacer = (): string => parameters.newString;
     const updatedContent = parameters.replaceAll
@@ -113,6 +125,38 @@ export class EditFileTool
     const tempPath = `${fullPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
     await writeFile(tempPath, buffer);
     await rename(tempPath, fullPath);
+
+    if (context.isCheckpointEnabled && context.checkpointStore) {
+      try {
+        const afterHash = await context.checkpointStore.storeBlob(buffer);
+        const relativeFilePath = path.relative(context.workingDirectory, fullPath);
+        const checkpointId = `cp_${Date.now()}_${randomUUID().slice(0, 8)}`;
+        const record = await context.checkpointStore.createCheckpoint(context.threadId, {
+          id: checkpointId,
+          threadId: context.threadId,
+          turnIndex: 0,
+          toolName: EditFileTool.toolName,
+          timestamp: Date.now(),
+          coverage: "partial",
+          files: [
+            {
+              relativePath: relativeFilePath,
+              ...(beforeHash ? { beforeHash } : {}),
+              afterHash,
+              status: "~",
+            },
+          ],
+        });
+        context.onCheckpointCreated?.({
+          checkpointId,
+          sequence: record.sequence,
+          label: `EditFile: ${parameters.filePath}`,
+          filesTouched: [parameters.filePath],
+        });
+      } catch {
+        // Silently continue if checkpoint recording fails
+      }
+    }
 
     return {
       filePath: parameters.filePath,

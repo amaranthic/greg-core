@@ -4,9 +4,10 @@
  * @packageDocumentation
  */
 
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path, { dirname } from "node:path";
 import { z } from "zod";
 import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
@@ -46,14 +47,13 @@ export class WriteFileTool
   public readonly name = WriteFileTool.toolName;
   public readonly description = writeFileDescription;
   public readonly inputSchema = writeFileInputSchema;
-  public readonly isMutating = true;
-  public readonly isConcurrencySafe = false;
 
   /**
-   * Executes the file writing operation atomically.
+   * Executes the file writing operation atomically, automatically capturing
+   * a content-addressed checkpoint snapshot if checkpointing is enabled on the session.
    *
    * @param parameters - Validated parameters containing filePath and content.
-   * @param context - The execution context with workingDirectory.
+   * @param context - The execution context with workingDirectory and checkpoint store.
    * @returns A promise resolving to the structured write result.
    */
   public async execute(
@@ -71,12 +71,57 @@ export class WriteFileTool
     }
 
     const fileExisted = existsSync(fullPath);
+    let beforeHash: string | undefined;
+
+    // Self-contained checkpoint capture prior to mutating the file
+    if (context.isCheckpointEnabled && context.checkpointStore && fileExisted) {
+      try {
+        const existingContent = await readFile(fullPath);
+        beforeHash = await context.checkpointStore.storeBlob(existingContent);
+      } catch {
+        // Continue if reading pre-mutation content fails
+      }
+    }
+
     const buffer = Buffer.from(parameters.content, "utf-8");
 
     // Atomic write pattern: write to temporary sibling file, then rename
     const tempPath = `${fullPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
     await writeFile(tempPath, buffer);
     await rename(tempPath, fullPath);
+
+    // Record checkpoint record after successful mutation
+    if (context.isCheckpointEnabled && context.checkpointStore) {
+      try {
+        const afterHash = await context.checkpointStore.storeBlob(buffer);
+        const relativeFilePath = path.relative(context.workingDirectory, fullPath);
+        const checkpointId = `cp_${Date.now()}_${randomUUID().slice(0, 8)}`;
+        const record = await context.checkpointStore.createCheckpoint(context.threadId, {
+          id: checkpointId,
+          threadId: context.threadId,
+          turnIndex: 0,
+          toolName: WriteFileTool.toolName,
+          timestamp: Date.now(),
+          coverage: "partial",
+          files: [
+            {
+              relativePath: relativeFilePath,
+              ...(beforeHash ? { beforeHash } : {}),
+              afterHash,
+              status: fileExisted ? "~" : "+",
+            },
+          ],
+        });
+        context.onCheckpointCreated?.({
+          checkpointId,
+          sequence: record.sequence,
+          label: `WriteFile: ${parameters.filePath}`,
+          filesTouched: [parameters.filePath],
+        });
+      } catch {
+        // Silently continue if checkpoint recording fails to avoid failing tool execution
+      }
+    }
 
     const lineCount = parameters.content.split("\n").length;
 

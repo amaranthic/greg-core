@@ -139,7 +139,6 @@ export type {
 
 // Thread Sessions & Stores
 export {
-  MemoryThreadStore,
   FileThreadStore,
 } from "./threads/index.js";
 
@@ -186,7 +185,6 @@ export type {
   StepTokenUsage,
   TurnFinishReason,
   CheckpointCreatedEvent,
-  CheckpointRestoredEvent,
   ErrorEvent,
   RetryScheduledEvent,
 } from "./events/index.js";
@@ -204,19 +202,8 @@ export type {
   ToolAuthorizeContext,
   PermissionDecision,
   OnAuthorizeToolHook,
-  ToolInputFormatContext,
-  OnFormatToolInputHook,
-  ToolOutputFormatContext,
-  OnFormatToolOutputHook,
-  ThreadUpdateContext,
-  OnThreadUpdateHook,
   ThreadErrorContext,
   OnErrorHook,
-  CheckpointCreatedContext,
-  OnCheckpointCreatedHook,
-  PostRollbackContext,
-  OnPostRollbackHook,
-  OnRetryHook,
 } from "./hooks/index.js";
 
 // Structured Errors

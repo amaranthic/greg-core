@@ -4,5 +4,4 @@
  */
 
 export * from "./types.js";
-export * from "./MemoryThreadStore.js";
 export * from "./FileThreadStore.js";

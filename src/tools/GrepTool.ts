@@ -120,8 +120,6 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
   public readonly name = GrepTool.toolName;
   public readonly description = grepDescription;
   public readonly inputSchema = grepInputSchema;
-  public readonly isMutating = false;
-  public readonly isConcurrencySafe = true;
 
   /**
    * Executes the grep content search.

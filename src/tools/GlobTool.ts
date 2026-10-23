@@ -70,8 +70,6 @@ export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
   public readonly name = GlobTool.toolName;
   public readonly description = globDescription;
   public readonly inputSchema = globInputSchema;
-  public readonly isMutating = false;
-  public readonly isConcurrencySafe = true;
 
   /**
    * Executes the glob search operation.

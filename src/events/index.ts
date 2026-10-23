@@ -18,7 +18,6 @@ import type {
 } from './stepEvents.js';
 import type {
   CheckpointCreatedEvent,
-  CheckpointRestoredEvent,
 } from './checkpointEvents.js';
 import type { ErrorEvent, RetryScheduledEvent } from './errorEvents.js';
 
@@ -45,7 +44,6 @@ export type {
 
 export type {
   CheckpointCreatedEvent,
-  CheckpointRestoredEvent,
 } from './checkpointEvents.js';
 
 export type {
@@ -86,6 +84,5 @@ export type AgentEvent =
   | StepFinishedEvent
   | TurnFinishedEvent
   | CheckpointCreatedEvent
-  | CheckpointRestoredEvent
   | RetryScheduledEvent
   | ErrorEvent;

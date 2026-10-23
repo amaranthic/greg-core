@@ -5,6 +5,8 @@
  * cancellation signal, and progress streaming callbacks.
  */
 
+import type { CheckpointStore } from "../checkpoints/index.js";
+
 /**
  * Execution context supplied to every tool execution.
  */
@@ -28,6 +30,28 @@ export interface ToolExecutionContext {
    * Optional abort signal for immediate cancellation of in-flight operations.
    */
   readonly abortSignal?: AbortSignal | undefined;
+
+  /**
+   * Optional CheckpointStore instance for capturing file delta snapshots.
+   */
+  readonly checkpointStore?: CheckpointStore | undefined;
+
+  /**
+   * Whether checkpointing is actively enabled for this thread session.
+   */
+  readonly isCheckpointEnabled?: boolean | undefined;
+
+  /**
+   * Optional callback invoked by tools when a checkpoint snapshot is created.
+   */
+  readonly onCheckpointCreated?:
+    | ((event: {
+        readonly checkpointId: string;
+        readonly sequence: number;
+        readonly label: string;
+        readonly filesTouched: readonly string[];
+      }) => void)
+    | undefined;
 
   /**
    * Optional callback to emit streaming progress chunks (e.g. progressive shell output).

@@ -1,30 +1,9 @@
 /**
- * @fileoverview Thread lifecycle and error hook interface definitions.
+ * @fileoverview Error hook interface definitions.
  * @packageDocumentation
  */
 
-import type { ModelMessage } from '../model/types.js';
 import type { ErrorOrigin } from '../events/errorEvents.js';
-
-/**
- * Context provided when thread state or messages are updated.
- */
-export interface ThreadUpdateContext {
-  /** Unique identifier of the updated thread. */
-  readonly threadId: string;
-  /** Full, ordered conversational messages for the thread. */
-  readonly messages: readonly ModelMessage[];
-  /** Optional turn index that triggered this update. */
-  readonly turnIndex?: number;
-  /** Optional cumulative token usage data. */
-  readonly usage?: unknown;
-}
-
-/**
- * Hook invoked when thread state or messages change.
- * Allows products to persist threads (e.g. to JSONL or database).
- */
-export type OnThreadUpdateHook = (context: ThreadUpdateContext) => Promise<void> | void;
 
 /**
  * Context provided when an unhandled error occurs during execution.

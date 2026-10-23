@@ -1,5 +1,5 @@
 /**
- * @fileoverview Autonomous turn loop async generator driving multi-step model and tool execution.
+ * @fileoverview Autonomous multi-step turn runner for the agent engine microkernel.
  * @packageDocumentation
  */
 
@@ -8,47 +8,11 @@ import { streamText, type HernexStreamTextOptions as GregStreamTextOptions } fro
 import type { ModelMessage } from '../model/types.js';
 import type { AgentEvent } from '../events/index.js';
 import type { StepTokenUsage, TurnFinishReason } from '../events/stepEvents.js';
-import type { ToolExecutionContext } from '../tools/ToolExecutionContext.js';
+import type { CheckpointCreatedEvent } from '../events/checkpointEvents.js';
 import type { AgentEngineConfig, RunTurnOptions } from './engineConfig.js';
+import type { ToolExecutionContext } from '../tools/ToolExecutionContext.js';
 import { AsyncEventQueue } from './eventQueue.js';
 
-/**
- * Executes a single autonomous agent turn, yielding streaming events in a strict lifecycle sequence.
- *
- * Sequence:
- * 1. Emit `turnStarted` event.
- * 2. Invoke `hooks.onPreTurn()` and await product modifications.
- * 3. Append user message to thread conversation history.
- * 4. Autonomous step loop:
- *    a. Check maxSteps and abort signals.
- *    b. Emit `stepStarted` event.
- *    c. Call `streamText()` with model instructions, messages, and adapted tool definitions.
- *    d. Stream chunks: `text-delta` -> `tokenDelta`, `reasoning-delta` -> `thoughtDelta`, `tool-call` -> `toolCallProposed`.
- *    e. Append assistant response message to conversation history.
- *    f. If no tool calls were proposed:
- *       - Invoke `hooks.onShouldStop()`.
- *       - If shouldStop is false: append reminder prompt, emit `stepFinished`, call `hooks.onThreadUpdate()`, and continue.
- *       - If shouldStop is true: emit `stepFinished`, emit `turnFinished`, call `hooks.onThreadUpdate()`, and break.
- *    g. If tool calls were proposed:
- *       - For each tool call:
- *         i. Call `hooks.onAuthorizeTool()`. If denied, record denial and emit `toolExecutionFinished` with `isError: true`.
- *         ii. If allowed:
- *             - If mutating: emit `checkpointCreated`, call `hooks.onCheckpointCreated()`.
- *             - Emit `toolExecutionStarted`.
- *             - Execute tool (yielding `toolExecutionDelta` for progress chunks).
- *             - Emit `toolExecutionFinished`.
- *         iii. Call `hooks.onFormatToolOutput()` if configured.
- *       - Append tool results to conversation history.
- *       - Emit `stepFinished` with step token usage.
- *       - Call `hooks.onThreadUpdate()`.
- *       - Check `hooks.onShouldStop()`.
- * 5. Call `hooks.onPostTurn()`.
- *
- * @param config - The active engine configuration.
- * @param options - Per-turn options including user prompt and overrides.
- * @param conversationMessages - Mutable array of thread conversation messages.
- * @returns An async generator yielding `AgentEvent`s.
- */
 /**
  * Extracts normalized provider identifier from a model string if formatted as "provider/model_id".
  */
@@ -87,6 +51,14 @@ function combineAbortSignals(
   return controller.signal;
 }
 
+/**
+ * Runs a single autonomous turn within the agent engine microkernel.
+ *
+ * @param config - The active engine configuration.
+ * @param options - Per-turn options including user prompt and overrides.
+ * @param conversationMessages - Mutable array of thread conversation messages.
+ * @returns An async generator yielding pure serializable `AgentEvent` objects.
+ */
 export async function* runTurn(
   config: AgentEngineConfig,
   options: RunTurnOptions,
@@ -102,6 +74,14 @@ export async function* runTurn(
   );
   const maxSteps = options.maxSteps ?? config.maxSteps ?? 25;
   const reasoning = options.reasoning ?? config.reasoning;
+
+  // Persistence and Checkpoint invariants: if persist is false, checkpoint is strictly false
+  const isPersist = Boolean(config.persist ?? Boolean(config.threadStore));
+  const isCheckpointEnabled = isPersist && Boolean(
+    typeof config.checkpoint === 'boolean'
+      ? config.checkpoint
+      : config.checkpoint?.enabled ?? Boolean(config.checkpointStore),
+  );
 
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -125,12 +105,11 @@ export async function* runTurn(
     return usage;
   };
 
-  let checkpointSequence = 1;
   let finishReason: TurnFinishReason = 'completed';
   const initialHistoryLength = conversationMessages.length;
 
   try {
-    // Credential invariant check (B-04): ensure per-turn model cannot silently reuse another provider's credentials
+    // Credential invariant check: ensure per-turn model cannot silently reuse another provider's credentials
     const configProvider = getModelProvider(config.model);
     const overrideProvider = getModelProvider(options.model);
     if (
@@ -151,6 +130,15 @@ export async function* runTurn(
       userMessage: userPrompt,
     };
 
+    if (config.threadStore) {
+      await config.threadStore.appendTranscript(config.threadId, {
+        type: 'turnStarted',
+        turnIndex,
+        userPrompt,
+        timestamp: Date.now(),
+      });
+    }
+
     // 2. Call hooks.onPreTurn() -> await product decision
     let effectiveUserPrompt = userPrompt;
     let injectedInstructions = '';
@@ -169,6 +157,14 @@ export async function* runTurn(
             finishReason,
             totalUsage: buildTotalUsage(),
           };
+          if (config.threadStore) {
+            await config.threadStore.appendTranscript(config.threadId, {
+              type: 'turnFinished',
+              turnIndex,
+              finishReason,
+              timestamp: Date.now(),
+            });
+          }
           return;
         }
         if (preTurnResult.userPrompt) {
@@ -180,19 +176,30 @@ export async function* runTurn(
       }
     }
 
-    const combinedInstructions = [
+    // 3. Append user message to conversation history
+    const userMessage: ModelMessage = {
+      role: 'user',
+      content: effectiveUserPrompt,
+    };
+    conversationMessages.push(userMessage);
+
+    if (config.threadStore) {
+      await config.threadStore.appendTranscript(config.threadId, {
+        type: 'modelMessage',
+        message: userMessage,
+        timestamp: Date.now(),
+      });
+    }
+
+    // Combine instructions cleanly
+    const instructionsList = [
       config.instructions,
       options.instructions,
       injectedInstructions,
-    ]
-      .filter((part): part is string => Boolean(part && part.trim().length > 0))
-      .join('\n\n') || undefined;
+    ].filter((inst): inst is string => Boolean(inst && inst.trim().length > 0));
 
-    // 3. Append user message to conversation history
-    conversationMessages.push({
-      role: 'user',
-      content: effectiveUserPrompt,
-    });
+    const combinedInstructions =
+      instructionsList.length > 0 ? instructionsList.join('\n\n') : undefined;
 
     // 4. Autonomous step loop
     let stepIndex = 1;
@@ -206,6 +213,14 @@ export async function* runTurn(
           finishReason,
           totalUsage: buildTotalUsage(),
         };
+        if (config.threadStore) {
+          await config.threadStore.appendTranscript(config.threadId, {
+            type: 'turnFinished',
+            turnIndex,
+            finishReason,
+            timestamp: Date.now(),
+          });
+        }
         return;
       }
 
@@ -219,7 +234,6 @@ export async function* runTurn(
       const sdkToolDefinitions = config.tools.toSdkToolDefinitions();
       const hasTools = Object.keys(sdkToolDefinitions).length > 0;
 
-      // Construct streamText options without explicit undefined keys for exactOptionalPropertyTypes
       const streamOptions: GregStreamTextOptions = {
         model: options.model ?? config.model,
         apiKey: options.apiKey ?? config.apiKey,
@@ -231,50 +245,92 @@ export async function* runTurn(
         ...(effectiveSignal ? { abortSignal: effectiveSignal } : {}),
       };
 
-      const streamResult = streamText(streamOptions);
-
       const proposedToolCalls: Array<{
         callId: string;
         toolName: string;
         parameters: unknown;
       }> = [];
 
-      // Consume streaming chunks
-      for await (const chunk of streamResult.stream) {
-        if (chunk.type === 'text-delta') {
-          yield {
-            type: 'tokenDelta',
-            text: (chunk as any).text ?? (chunk as any).textDelta ?? '',
-            messageId: (chunk as any).id,
-          };
-        } else if (chunk.type === 'reasoning-delta') {
-          yield {
-            type: 'thoughtDelta',
-            text: (chunk as any).text ?? (chunk as any).textDelta ?? '',
-            messageId: (chunk as any).id,
-          };
-        } else if (chunk.type === 'tool-call') {
-          const rawCall = chunk as any;
-          const toolCall = {
-            callId: rawCall.toolCallId ?? rawCall.id ?? randomUUID(),
-            toolName: rawCall.toolName,
-            parameters: rawCall.input ?? rawCall.args ?? {},
-          };
-          proposedToolCalls.push(toolCall);
-          yield {
-            type: 'toolCallProposed',
-            callId: toolCall.callId,
-            toolName: toolCall.toolName,
-            parameters: toolCall.parameters,
-          };
+      let responseMessages: ModelMessage[] = [];
+      let rawUsage: any = {};
+      const maxRetries = 3;
+
+      // Resilient execution with retryScheduled events for transient rate limits and network drops
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const proposedToolCallsInAttempt: typeof proposedToolCalls = [];
+        try {
+          const streamResult = streamText(streamOptions);
+
+          for await (const chunk of streamResult.stream) {
+            if (chunk.type === 'text-delta') {
+              yield {
+                type: 'tokenDelta',
+                text: (chunk as any).text ?? (chunk as any).textDelta ?? '',
+                messageId: (chunk as any).id,
+              };
+            } else if (chunk.type === 'reasoning-delta') {
+              yield {
+                type: 'thoughtDelta',
+                text: (chunk as any).text ?? (chunk as any).textDelta ?? '',
+                messageId: (chunk as any).id,
+              };
+            } else if (chunk.type === 'tool-call') {
+              const rawCall = chunk as any;
+              const toolCall = {
+                callId: rawCall.toolCallId ?? rawCall.id ?? randomUUID(),
+                toolName: rawCall.toolName,
+                parameters: rawCall.input ?? rawCall.args ?? {},
+              };
+              proposedToolCallsInAttempt.push(toolCall);
+              yield {
+                type: 'toolCallProposed',
+                callId: toolCall.callId,
+                toolName: toolCall.toolName,
+                parameters: toolCall.parameters,
+              };
+            }
+          }
+
+          responseMessages = await streamResult.responseMessages;
+          rawUsage = await streamResult.usage;
+          proposedToolCalls.push(...proposedToolCallsInAttempt);
+          break;
+        } catch (streamError) {
+          const errorInstance =
+            streamError instanceof Error ? streamError : new Error(String(streamError));
+          const isTransient =
+            /429|500|502|503|504|fetch|network|ECONNRESET|ETIMEDOUT|rate limit/i.test(
+              errorInstance.message,
+            );
+
+          if (attempt < maxRetries && isTransient && !effectiveSignal?.aborted) {
+            const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
+            yield {
+              type: 'retryScheduled',
+              attempt: attempt + 1,
+              maxRetries,
+              delayMs,
+              error: errorInstance,
+            };
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            continue;
+          }
+          throw errorInstance;
         }
       }
 
       // Collect assistant response messages and step token metrics
-      const responseMessages = await streamResult.responseMessages;
       conversationMessages.push(...responseMessages);
+      if (config.threadStore) {
+        for (const msg of responseMessages) {
+          await config.threadStore.appendTranscript(config.threadId, {
+            type: 'modelMessage',
+            message: msg,
+            timestamp: Date.now(),
+          });
+        }
+      }
 
-      const rawUsage = await streamResult.usage;
       const stepUsage: StepTokenUsage = {
         promptTokens: rawUsage.inputTokens ?? 0,
         completionTokens: rawUsage.outputTokens ?? 0,
@@ -301,25 +357,25 @@ export async function* runTurn(
           });
 
           if (!stopDecision.shouldStop) {
-            conversationMessages.push({
+            const reminderMessage: ModelMessage = {
               role: 'user',
               content: stopDecision.reminderPrompt,
-            });
+            };
+            conversationMessages.push(reminderMessage);
+
+            if (config.threadStore) {
+              await config.threadStore.appendTranscript(config.threadId, {
+                type: 'modelMessage',
+                message: reminderMessage,
+                timestamp: Date.now(),
+              });
+            }
 
             yield {
               type: 'stepFinished',
               stepIndex,
               usage: stepUsage,
             };
-
-            if (config.hooks?.onThreadUpdate) {
-              await config.hooks.onThreadUpdate({
-                threadId: config.threadId,
-                messages: conversationMessages,
-                turnIndex,
-                usage: buildTotalUsage(),
-              });
-            }
 
             stepIndex++;
             continue;
@@ -340,12 +396,12 @@ export async function* runTurn(
           totalUsage: buildTotalUsage(),
         };
 
-        if (config.hooks?.onThreadUpdate) {
-          await config.hooks.onThreadUpdate({
-            threadId: config.threadId,
-            messages: conversationMessages,
+        if (config.threadStore) {
+          await config.threadStore.appendTranscript(config.threadId, {
+            type: 'turnFinished',
             turnIndex,
-            usage: buildTotalUsage(),
+            finishReason,
+            timestamp: Date.now(),
           });
         }
 
@@ -361,9 +417,19 @@ export async function* runTurn(
       }> = [];
 
       for (const toolCall of proposedToolCalls) {
+        if (config.threadStore) {
+          await config.threadStore.appendTranscript(config.threadId, {
+            type: 'toolCall',
+            callId: toolCall.callId,
+            toolName: toolCall.toolName,
+            parameters: toolCall.parameters,
+            timestamp: Date.now(),
+          });
+        }
+
         const agentTool = config.tools.resolve(toolCall.toolName);
         if (!agentTool) {
-          const denialResult = {
+          const missingErrorResult = {
             isError: true,
             error: `Tool "${toolCall.toolName}" is not registered in ToolRegistry.`,
           };
@@ -372,7 +438,7 @@ export async function* runTurn(
             type: 'toolExecutionFinished',
             callId: toolCall.callId,
             toolName: toolCall.toolName,
-            result: denialResult,
+            result: missingErrorResult,
             isError: true,
             durationMs: 0,
           };
@@ -380,13 +446,24 @@ export async function* runTurn(
           toolResults.push({
             toolCallId: toolCall.callId,
             toolName: toolCall.toolName,
-            result: denialResult,
+            result: missingErrorResult,
             isError: true,
           });
+
+          if (config.threadStore) {
+            await config.threadStore.appendTranscript(config.threadId, {
+              type: 'toolResult',
+              callId: toolCall.callId,
+              toolName: toolCall.toolName,
+              result: missingErrorResult,
+              isError: true,
+              timestamp: Date.now(),
+            });
+          }
           continue;
         }
 
-        // Validate tool input parameters before authorization hooks
+        // Validate tool input parameters before authorization
         let parsedParameters: unknown;
         try {
           parsedParameters = agentTool.inputSchema.parse(toolCall.parameters);
@@ -411,23 +488,36 @@ export async function* runTurn(
             result: schemaErrorResult,
             isError: true,
           });
+
+          if (config.threadStore) {
+            await config.threadStore.appendTranscript(config.threadId, {
+              type: 'toolResult',
+              callId: toolCall.callId,
+              toolName: toolCall.toolName,
+              result: schemaErrorResult,
+              isError: true,
+              timestamp: Date.now(),
+            });
+          }
           continue;
         }
 
-        const isMutating = agentTool.isMutating;
-        let isAllowed = true;
-        let denialReason = 'Tool execution was denied';
+        // Tool authorization check - FAIL CLOSED BY DEFAULT FOR ALL TOOLS
+        let isAllowed = false;
+        let denialReason =
+          'Tool execution denied: no authorization policy configured. All tools fail closed by default.';
 
         if (config.hooks?.onAuthorizeTool) {
           try {
             const decision = await config.hooks.onAuthorizeTool({
               toolName: toolCall.toolName,
               parameters: parsedParameters,
-              isMutating,
               workingDirectory: config.workingDirectory,
             });
 
-            if (decision.decision === 'deny') {
+            if (decision.decision === 'allow') {
+              isAllowed = true;
+            } else if (decision.decision === 'deny') {
               isAllowed = false;
               denialReason = decision.reason;
             }
@@ -435,10 +525,6 @@ export async function* runTurn(
             isAllowed = false;
             denialReason = `Authorization check failed: ${authError instanceof Error ? authError.message : String(authError)}`;
           }
-        } else if (isMutating) {
-          // Mutating tools fail closed when no authorization hook is provided
-          isAllowed = false;
-          denialReason = `Mutating tool "${toolCall.toolName}" requires an explicit authorization policy.`;
         }
 
         if (!isAllowed) {
@@ -462,38 +548,18 @@ export async function* runTurn(
             result: denialResult,
             isError: true,
           });
-          continue;
-        }
 
-        // Checkpoint before mutating tool execution
-        if (isMutating && config.checkpoint?.enabled !== false) {
-          const checkpointId = `cp_${Date.now()}_${randomUUID().slice(0, 8)}`;
-          const filesTouched: string[] = [];
-          const rawParams = parsedParameters as Record<string, unknown> | null;
-          if (rawParams && typeof rawParams.filePath === 'string') {
-            filesTouched.push(rawParams.filePath);
-          } else if (rawParams && typeof rawParams.path === 'string') {
-            filesTouched.push(rawParams.path);
-          }
-
-          yield {
-            type: 'checkpointCreated',
-            checkpointId,
-            sequence: checkpointSequence,
-            label: `Before mutating tool: ${toolCall.toolName}`,
-            filesTouched,
-          };
-
-          if (config.hooks?.onCheckpointCreated) {
-            await config.hooks.onCheckpointCreated({
-              checkpointId,
-              sequence: checkpointSequence,
-              label: `Before mutating tool: ${toolCall.toolName}`,
-              filesTouched,
+          if (config.threadStore) {
+            await config.threadStore.appendTranscript(config.threadId, {
+              type: 'toolResult',
+              callId: toolCall.callId,
+              toolName: toolCall.toolName,
+              result: denialResult,
+              isError: true,
+              timestamp: Date.now(),
             });
           }
-
-          checkpointSequence++;
+          continue;
         }
 
         // Emit toolExecutionStarted
@@ -509,6 +575,7 @@ export async function* runTurn(
         let isToolError = false;
 
         const progressQueue = new AsyncEventQueue<string>();
+        const capturedCheckpoints: CheckpointCreatedEvent[] = [];
 
         const executePromise = (async () => {
           try {
@@ -517,19 +584,23 @@ export async function* runTurn(
               toolCallId: toolCall.callId,
               workingDirectory: config.workingDirectory,
               abortSignal: effectiveSignal,
+              checkpointStore: config.checkpointStore,
+              isCheckpointEnabled,
+              onCheckpointCreated: (cp) => {
+                capturedCheckpoints.push({
+                  type: 'checkpointCreated',
+                  checkpointId: cp.checkpointId,
+                  sequence: cp.sequence,
+                  label: cp.label,
+                  filesTouched: cp.filesTouched,
+                });
+              },
               emitProgress: (chunk: string) => {
                 progressQueue.push(chunk);
               },
             };
 
-            if (agentTool.isConcurrencySafe) {
-              return await agentTool.execute(parsedParameters, executionContext);
-            }
-
-            return await config.tools.executionQueue.run(
-              () => agentTool.execute(parsedParameters, executionContext),
-              effectiveSignal,
-            );
+            return await agentTool.execute(parsedParameters, executionContext);
           } catch (error) {
             isToolError = true;
             return {
@@ -552,6 +623,11 @@ export async function* runTurn(
 
         executionResult = await executePromise;
 
+        // Yield any checkpoints created by self-contained tools during execution
+        for (const cp of capturedCheckpoints) {
+          yield cp;
+        }
+
         const durationMs = Date.now() - startTime;
         yield {
           type: 'toolExecutionFinished',
@@ -562,21 +638,23 @@ export async function* runTurn(
           durationMs,
         };
 
-        let formattedResult = executionResult;
-        if (config.hooks?.onFormatToolOutput) {
-          formattedResult = await config.hooks.onFormatToolOutput({
-            toolName: toolCall.toolName,
-            rawResult: executionResult,
-            isError: isToolError,
-          });
-        }
-
         toolResults.push({
           toolCallId: toolCall.callId,
           toolName: toolCall.toolName,
-          result: formattedResult,
+          result: executionResult,
           isError: isToolError,
         });
+
+        if (config.threadStore) {
+          await config.threadStore.appendTranscript(config.threadId, {
+            type: 'toolResult',
+            callId: toolCall.callId,
+            toolName: toolCall.toolName,
+            result: executionResult,
+            isError: isToolError,
+            timestamp: Date.now(),
+          });
+        }
       }
 
       // Append tool results message
@@ -588,9 +666,12 @@ export async function* runTurn(
           toolName: tr.toolName,
           output:
             typeof tr.result === 'string'
-              ? { type: 'text', value: tr.result }
-              : { type: 'json', value: (tr.result ?? {}) as any },
-        })),
+              ? tr.result
+              : {
+                  type: 'text',
+                  value: JSON.stringify(tr.result),
+                },
+        })) as any,
       });
 
       // Emit stepFinished
@@ -600,20 +681,10 @@ export async function* runTurn(
         usage: stepUsage,
       };
 
-      // Call onThreadUpdate with an immutable snapshot
-      if (config.hooks?.onThreadUpdate) {
-        await config.hooks.onThreadUpdate({
-          threadId: config.threadId,
-          messages: [...conversationMessages],
-          turnIndex,
-          usage: buildTotalUsage(),
-        });
-      }
-
       stepIndex++;
     }
 
-    // Exceeded maxSteps
+    // Step budget exhausted
     finishReason = 'maxSteps';
     yield {
       type: 'turnFinished',
@@ -621,6 +692,15 @@ export async function* runTurn(
       finishReason,
       totalUsage: buildTotalUsage(),
     };
+
+    if (config.threadStore) {
+      await config.threadStore.appendTranscript(config.threadId, {
+        type: 'turnFinished',
+        turnIndex,
+        finishReason,
+        timestamp: Date.now(),
+      });
+    }
   } catch (error) {
     // Roll back in-progress conversation additions if unhandled exception occurs
     conversationMessages.length = initialHistoryLength;
@@ -650,6 +730,15 @@ export async function* runTurn(
       finishReason,
       totalUsage: buildTotalUsage(),
     };
+
+    if (config.threadStore) {
+      await config.threadStore.appendTranscript(config.threadId, {
+        type: 'turnFinished',
+        turnIndex,
+        finishReason,
+        timestamp: Date.now(),
+      });
+    }
   } finally {
     if (config.hooks?.onPostTurn) {
       try {
@@ -658,7 +747,7 @@ export async function* runTurn(
           finishReason,
           totalUsage: buildTotalUsage(),
         });
-      } catch (cleanupError) {
+      } catch {
         // Collect cleanup error without masking primary turn outcome
       }
     }

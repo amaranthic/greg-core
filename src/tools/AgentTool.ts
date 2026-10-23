@@ -35,25 +35,6 @@ export interface AgentTool<
   readonly inputSchema: TInput;
 
   /**
-   * REQUIRED: Specifies whether this tool mutates persistent state (file modifications,
-   * git commits, process creation, network side-effects).
-   *
-   * When `true`, the engine automatically initiates checkpointing and triggers
-   * inward permission authorization hooks (`onAuthorizeTool`).
-   */
-  readonly isMutating: boolean;
-
-  /**
-   * REQUIRED: Specifies whether multiple concurrent executions of this tool can safely
-   * run in parallel without race conditions or resource corruption.
-   *
-   * When `true`, parallel tool calls can proceed simultaneously.
-   * When `false`, the engine routes the invocation through `ToolExecutionQueue` to guarantee
-   * serial execution.
-   */
-  readonly isConcurrencySafe: boolean;
-
-  /**
    * Executes the tool logic using validated parameters and the current execution context.
    *
    * @param parameters - The validated parameters inferred from the tool's input schema.

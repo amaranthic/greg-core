@@ -17,8 +17,7 @@ export const readFileDescription =
 export const writeFileDescription =
   "Writes the complete content to a file in the workspace. " +
   "If the file does not exist, it is created along with any necessary parent directories. " +
-  "If the file already exists, it is completely overwritten. " +
-  "This tool is mutating and triggers checkpoint capture.";
+  "If the file already exists, it is completely overwritten.";
 
 /**
  * System prompt description for EditFileTool.
@@ -26,16 +25,14 @@ export const writeFileDescription =
 export const editFileDescription =
   "Performs surgical string replacement in a workspace file. " +
   "Requires exact matching of 'oldString' with existing file content, including indentation. " +
-  "If 'oldString' appears multiple times, specify 'replaceAll: true' or provide unique surrounding context. " +
-  "This tool is mutating and triggers checkpoint capture.";
+  "If 'oldString' appears multiple times, specify 'replaceAll: true' or provide unique surrounding context.";
 
 /**
  * System prompt description for BashTool.
  */
 export const bashDescription =
   "Executes a bash shell command in the workspace directory. " +
-  "Captures stdout, stderr, and exit code. Supports abort signals and execution timeouts. " +
-  "This tool is mutating and triggers checkpoint capture.";
+  "Captures stdout, stderr, and exit code. Supports abort signals and execution timeouts.";
 
 /**
  * System prompt description for GlobTool.

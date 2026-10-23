@@ -70,9 +70,17 @@ export interface AgentEngineConfig {
   readonly maxSteps?: number | undefined;
 
   /**
-   * Workspace checkpoint and delta-tracking configuration.
+   * Whether to persist the conversation thread, metadata, and transcript to disk.
+   * Defaults to false (completely in-memory and ephemeral).
    */
-  readonly checkpoint?: ThreadCheckpointConfig | undefined;
+  readonly persist?: boolean | undefined;
+
+  /**
+   * Whether to enable content-addressed file delta checkpoints.
+   * Invariant: Requires `persist: true`. If `persist` is false, checkpointing is strictly disabled.
+   * Defaults to false.
+   */
+  readonly checkpoint?: boolean | ThreadCheckpointConfig | undefined;
 
   /**
    * Optional global abort signal for cancelling in-flight engine operations.
@@ -80,12 +88,14 @@ export interface AgentEngineConfig {
   readonly abortSignal?: AbortSignal | undefined;
 
   /**
-   * Optional persistent ThreadStore backing this engine instance.
+   * Optional custom persistent ThreadStore backing this engine instance.
+   * If omitted and `persist: true`, a FileThreadStore is instantiated automatically.
    */
   readonly threadStore?: ThreadStore | undefined;
 
   /**
-   * Optional CheckpointStore backing this engine instance.
+   * Optional custom CheckpointStore backing this engine instance.
+   * If omitted and `persist: true` & `checkpoint: true`, a FileCheckpointStore is instantiated automatically.
    */
   readonly checkpointStore?: CheckpointStore | undefined;
 }

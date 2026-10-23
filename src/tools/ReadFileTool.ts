@@ -102,8 +102,6 @@ export class ReadFileTool
   public readonly name = ReadFileTool.toolName;
   public readonly description = readFileDescription;
   public readonly inputSchema = readFileInputSchema;
-  public readonly isMutating = false;
-  public readonly isConcurrencySafe = true;
 
   /**
    * Executes the file reading operation with safety checks and pagination.

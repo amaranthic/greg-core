@@ -40,6 +40,8 @@ export interface RestoreResult {
 }
 
 export interface CheckpointStore {
+  storeBlob(data: Buffer | Uint8Array): Promise<string>;
+  readBlob(sha256: string): Promise<Buffer>;
   createCheckpoint(
     threadId: string,
     checkpoint: Omit<CheckpointRecord, "sequence">,

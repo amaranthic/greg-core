@@ -26,8 +26,6 @@ class MockEchoTool implements AgentTool<typeof MockEchoTool.schema, { echo: stri
   public readonly name = 'mockEcho';
   public readonly description = 'Echoes input back.';
   public readonly inputSchema = MockEchoTool.schema;
-  public readonly isMutating = false;
-  public readonly isConcurrencySafe = true;
 
   public async execute(
     parameters: z.infer<typeof MockEchoTool.schema>,
@@ -50,8 +48,6 @@ class MockMutateTool implements AgentTool<typeof MockMutateTool.schema, { writte
   public readonly name = 'mockMutate';
   public readonly description = 'Mutates a mock file.';
   public readonly inputSchema = MockMutateTool.schema;
-  public readonly isMutating = true;
-  public readonly isConcurrencySafe = false;
 
   public async execute(
     _parameters: z.infer<typeof MockMutateTool.schema>,
@@ -163,20 +159,20 @@ describe('AgentEngine Core Invariants', () => {
     expect(definitions.mockMutate?.execute).toBeUndefined();
   });
 
-  it('correctly reports mutating and concurrency safety metadata across tools', () => {
-    const registry = new ToolRegistry({ includeDefaults: false });
-    registry.register(new MockEchoTool());
-    registry.register(new MockMutateTool());
+  it('enforces persistence and checkpoint dependency invariants', () => {
+    // Ephemeral by default: checkpoint forced to false
+    const engine1 = new AgentEngine(createBaseConfig({ checkpoint: true }));
+    expect(engine1.isPersisted).toBe(false);
+    expect(engine1.isCheckpointEnabled).toBe(false);
+    expect(engine1.threadStore).toBeUndefined();
+    expect(engine1.checkpointStore).toBeUndefined();
 
-    expect(registry.isMutating('mockEcho')).toBe(false);
-    expect(registry.isConcurrencySafe('mockEcho')).toBe(true);
-
-    expect(registry.isMutating('mockMutate')).toBe(true);
-    expect(registry.isConcurrencySafe('mockMutate')).toBe(false);
-
-    // Unknown tool defaults to false
-    expect(registry.isMutating('unknownTool')).toBe(false);
-    expect(registry.isConcurrencySafe('unknownTool')).toBe(false);
+    // Persisted engine with checkpoints enabled
+    const engine2 = new AgentEngine(createBaseConfig({ persist: true, checkpoint: true }));
+    expect(engine2.isPersisted).toBe(true);
+    expect(engine2.isCheckpointEnabled).toBe(true);
+    expect(engine2.threadStore).toBeDefined();
+    expect(engine2.checkpointStore).toBeDefined();
   });
 
   it('preserves hook lifecycle dispatch interfaces', () => {
@@ -188,25 +184,18 @@ describe('AgentEngine Core Invariants', () => {
         return { injectedInstructions: 'Be concise.' };
       },
       onAuthorizeTool: (context) => {
-        callLog.push(`authorize:${context.toolName}:${context.isMutating}`);
+        callLog.push(`authorize:${context.toolName}`);
         return { decision: 'allow' };
-      },
-      onCheckpointCreated: (context) => {
-        callLog.push(`checkpoint:${context.checkpointId}`);
-      },
-      onFormatToolOutput: (context) => {
-        callLog.push(`formatOutput:${context.toolName}`);
-        return context.rawResult;
       },
       onShouldStop: (context) => {
         callLog.push(`shouldStop:${context.finishReason}`);
         return { shouldStop: true };
       },
-      onThreadUpdate: (context) => {
-        callLog.push(`threadUpdate:${context.threadId}:${context.messages.length}`);
-      },
       onPostTurn: (context) => {
         callLog.push(`postTurn:${context.finishReason}`);
+      },
+      onError: (context) => {
+        callLog.push(`error:${context.origin}`);
       },
     };
 
@@ -218,43 +207,30 @@ describe('AgentEngine Core Invariants', () => {
     hooks.onAuthorizeTool!({
       toolName: 'mockMutate',
       parameters: { filePath: 'foo.ts', data: 'test' },
-      isMutating: true,
       workingDirectory: '/tmp',
-    });
-    hooks.onCheckpointCreated!({
-      checkpointId: 'cp_1',
-      sequence: 1,
-      label: 'test',
-      filesTouched: ['foo.ts'],
-    });
-    hooks.onFormatToolOutput!({
-      toolName: 'mockMutate',
-      rawResult: { written: true },
-      isError: false,
     });
     hooks.onShouldStop!({
       turnIndex: 1,
       finishReason: 'completed',
-    });
-    hooks.onThreadUpdate!({
-      threadId: 'th_test_123',
-      messages: [],
-      turnIndex: 1,
     });
     hooks.onPostTurn!({
       turnIndex: 1,
       finishReason: 'completed',
       totalUsage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
     });
+    hooks.onError!({
+      error: new Error('test failure'),
+      origin: 'engine',
+      turnIndex: 1,
+      isFatal: false,
+    });
 
     expect(callLog).toEqual([
       'preTurn:1',
-      'authorize:mockMutate:true',
-      'checkpoint:cp_1',
-      'formatOutput:mockMutate',
+      'authorize:mockMutate',
       'shouldStop:completed',
-      'threadUpdate:th_test_123:0',
       'postTurn:completed',
+      'error:engine',
     ]);
   });
 
@@ -309,5 +285,36 @@ describe('AgentEngine Core Invariants', () => {
     expect(finishEvent.finishReason).toBe('vetoed');
     // Ensure message history was NOT touched
     expect(engine.messages.length).toBe(0);
+  });
+
+  it('exposes direct convenience methods for checkpoints, metadata, and transcripts', async () => {
+    const threadId = `th_convenience_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const engine = new AgentEngine(
+      createBaseConfig({
+        threadId,
+        persist: true,
+        checkpoint: true,
+      }),
+    );
+
+    // Checkpoints list returns empty array for new thread
+    const checkpoints = await engine.listCheckpoints();
+    expect(checkpoints.length).toBe(0);
+
+    // Transcript returns empty array for new thread
+    const transcript = await engine.getTranscript();
+    expect(transcript.length).toBe(0);
+
+    // Manual checkpoint creation directly via engine
+    const createdCheckpoint = await engine.createCheckpoint({
+      label: 'Manual snapshot alpha',
+      files: ['src/index.ts'],
+    });
+    expect(createdCheckpoint.id).toBeDefined();
+    expect(createdCheckpoint.files.length).toBe(1);
+
+    const updatedCheckpoints = await engine.listCheckpoints();
+    expect(updatedCheckpoints.length).toBe(1);
+    expect(updatedCheckpoints[0]?.id).toBe(createdCheckpoint.id);
   });
 });

@@ -114,20 +114,7 @@ describe("ToolRegistry", () => {
     expect(registry.has("bash")).toBe(true);
     expect(registry.has("glob")).toBe(true);
     expect(registry.has("grep")).toBe(true);
-
-    expect(registry.isMutating("readFile")).toBe(false);
-    expect(registry.isMutating("writeFile")).toBe(true);
-    expect(registry.isMutating("editFile")).toBe(true);
-    expect(registry.isMutating("bash")).toBe(true);
-    expect(registry.isMutating("glob")).toBe(false);
-    expect(registry.isMutating("grep")).toBe(false);
-
-    expect(registry.isConcurrencySafe("readFile")).toBe(true);
-    expect(registry.isConcurrencySafe("writeFile")).toBe(false);
-    expect(registry.isConcurrencySafe("editFile")).toBe(false);
-    expect(registry.isConcurrencySafe("bash")).toBe(false);
-    expect(registry.isConcurrencySafe("glob")).toBe(true);
-    expect(registry.isConcurrencySafe("grep")).toBe(true);
+    expect(registry.list().length).toBe(6);
   });
 
   it("starts empty when includeDefaults is false", () => {
@@ -144,16 +131,12 @@ describe("ToolRegistry", () => {
       name: "ping",
       description: "Ping pong test tool",
       inputSchema: pingSchema,
-      isMutating: false,
-      isConcurrencySafe: true,
       execute: async (params) => ({ pong: params.msg }),
     };
 
     registry.register(pingTool);
     expect(registry.has("ping")).toBe(true);
     expect(registry.resolve("ping")).toBe(pingTool);
-    expect(registry.isMutating("ping")).toBe(false);
-    expect(registry.isConcurrencySafe("ping")).toBe(true);
 
     const removed = registry.unregister("ping");
     expect(removed).toBe(true);
@@ -167,8 +150,6 @@ describe("ToolRegistry", () => {
       name: "customTool",
       description: "Custom test tool",
       inputSchema: z.object({}),
-      isMutating: false,
-      isConcurrencySafe: true,
       execute: async () => ({ ok: true }),
     };
 
@@ -208,8 +189,6 @@ describe("ToolRegistry", () => {
       name: "echo",
       description: "Echoes input text",
       inputSchema: echoSchema,
-      isMutating: false,
-      isConcurrencySafe: true,
       execute: async (params, ctx) => {
         ctx.emitProgress?.("working...");
         return { text: params.text };
@@ -252,8 +231,6 @@ describe("ToolRegistry", () => {
       name: "strict",
       description: "Strict age validator",
       inputSchema: strictSchema,
-      isMutating: false,
-      isConcurrencySafe: true,
       execute: async (params) => `Age: ${params.age}`,
     };
 

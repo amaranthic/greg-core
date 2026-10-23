@@ -1,5 +1,5 @@
 /**
- * @fileoverview Tool authorization and I/O formatting hook interface definitions.
+ * @fileoverview Tool authorization hook interface definitions.
  * @packageDocumentation
  */
 
@@ -11,8 +11,6 @@ export interface ToolAuthorizeContext {
   readonly toolName: string;
   /** Parameters supplied by the model for the tool call. */
   readonly parameters: unknown;
-  /** Whether the tool is marked as mutating files or environment. */
-  readonly isMutating: boolean;
   /** Active working directory for the thread. */
   readonly workingDirectory: string;
 }
@@ -27,43 +25,8 @@ export type PermissionDecision =
 /**
  * Hook invoked before tool execution to determine authorization.
  * Allows products to enforce allowlists, denylists, sandboxes, or user prompts.
+ * Fail-closed: If this hook is not provided, all tool calls are denied by default.
  */
 export type OnAuthorizeToolHook = (
   context: ToolAuthorizeContext,
 ) => Promise<PermissionDecision> | PermissionDecision;
-
-/**
- * Context provided when formatting tool input parameters.
- */
-export interface ToolInputFormatContext {
-  /** Name of the tool being called. */
-  readonly toolName: string;
-  /** Raw parameters provided by the model. */
-  readonly parameters: unknown;
-}
-
-/**
- * Hook invoked to format or sanitize tool input parameters before display or logging.
- */
-export type OnFormatToolInputHook = (
-  context: ToolInputFormatContext,
-) => Promise<unknown> | unknown;
-
-/**
- * Context provided when formatting tool output before adding to transcript.
- */
-export interface ToolOutputFormatContext {
-  /** Name of the tool that executed. */
-  readonly toolName: string;
-  /** Raw result returned by the tool execution. */
-  readonly rawResult: unknown;
-  /** Whether the tool execution resulted in an error. */
-  readonly isError: boolean;
-}
-
-/**
- * Hook invoked to transform or truncate tool output data before adding to transcript.
- */
-export type OnFormatToolOutputHook = (
-  context: ToolOutputFormatContext,
-) => Promise<unknown> | unknown;

@@ -60,8 +60,6 @@ export class BashTool implements AgentTool<typeof bashInputSchema, BashOutput> {
   public readonly name = BashTool.toolName;
   public readonly description = bashDescription;
   public readonly inputSchema = bashInputSchema;
-  public readonly isMutating = true;
-  public readonly isConcurrencySafe = false;
 
   /**
    * Executes a shell command within the workspace directory.
